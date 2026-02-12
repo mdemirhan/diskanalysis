@@ -1,0 +1,111 @@
+from __future__ import annotations
+
+from collections import defaultdict
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
+from diskanalysis.config.schema import AppConfig
+from diskanalysis.models.enums import InsightCategory, NodeKind
+from diskanalysis.models.insight import Insight, InsightBundle
+from diskanalysis.models.scan import ScanNode, ScanSuccess
+from diskanalysis.services.formatting import format_bytes
+
+
+def _iter_nodes(node: ScanNode):
+    yield node
+    for child in node.children:
+        yield from _iter_nodes(child)
+
+
+def _top_consumers(root: ScanNode, top_n: int) -> list[ScanNode]:
+    items = [node for node in _iter_nodes(root) if node.path != root.path]
+    items.sort(key=lambda n: n.size_bytes, reverse=True)
+    return items[:top_n]
+
+
+def _stats_panel(scan: ScanSuccess, bundle: InsightBundle) -> Panel:
+    stats = scan.stats
+    body = (
+        f"Files: [bold]{stats.files}[/bold]\n"
+        f"Directories: [bold]{stats.directories}[/bold]\n"
+        f"Total Size: [bold]{format_bytes(scan.root.size_bytes)}[/bold]\n"
+        f"Insights: [bold]{len(bundle.insights)}[/bold]\n"
+        f"Reclaimable: [bold]{format_bytes(bundle.reclaimable_bytes)}[/bold]\n"
+        f"Safe to Delete: [bold]{format_bytes(bundle.safe_reclaimable_bytes)}[/bold]\n"
+        f"Access Errors: [bold]{stats.access_errors}[/bold]"
+    )
+    return Panel(body, title="Scan Summary", border_style="blue")
+
+
+def render_summary(console: Console, scan: ScanSuccess, bundle: InsightBundle, config: AppConfig) -> None:
+    console.print(_stats_panel(scan, bundle))
+
+    top_table = Table(title="Top Space Consumers", header_style="bold cyan")
+    top_table.add_column("Path")
+    top_table.add_column("Type", justify="center")
+    top_table.add_column("Size", justify="right")
+
+    for node in _top_consumers(scan.root, config.top_n):
+        top_table.add_row(node.path, "DIR" if node.kind is NodeKind.DIRECTORY else "FILE", format_bytes(node.size_bytes))
+    console.print(top_table)
+
+    by_category: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))
+    for item in bundle.insights:
+        count, total = by_category[item.category.value]
+        by_category[item.category.value] = (count + 1, total + item.size_bytes)
+
+    cat_table = Table(title="Insights by Category", header_style="bold magenta")
+    cat_table.add_column("Category")
+    cat_table.add_column("Count", justify="right")
+    cat_table.add_column("Size", justify="right")
+    for category, (count, total) in sorted(by_category.items(), key=lambda x: x[1][1], reverse=True):
+        cat_table.add_row(category, str(count), format_bytes(total))
+    console.print(cat_table)
+
+    quick_wins = [item for item in bundle.insights if item.safe_to_delete][: config.top_n]
+    wins_table = Table(title="Quick Wins (Safe to Delete)", header_style="bold green")
+    wins_table.add_column("Path")
+    wins_table.add_column("Size", justify="right")
+    wins_table.add_column("Recommendation")
+
+    for item in quick_wins:
+        wins_table.add_row(item.path, format_bytes(item.size_bytes), item.recommendation)
+    console.print(wins_table)
+
+
+def render_focused_summary(
+    console: Console,
+    title: str,
+    analyzed_total: int,
+    safe_total: int,
+    insights: list[Insight],
+    top_n: int,
+) -> None:
+    console.print(Panel(f"Analyzed: [bold]{format_bytes(analyzed_total)}[/bold]\nSafe to Delete: [bold]{format_bytes(safe_total)}[/bold]", title=title))
+
+    table = Table(title="Top Candidates", header_style="bold yellow")
+    table.add_column("Path")
+    table.add_column("Category")
+    table.add_column("Size", justify="right")
+    table.add_column("Safe", justify="center")
+    table.add_column("Recommendation")
+
+    for item in insights[:top_n]:
+        table.add_row(
+            item.path,
+            item.category.value,
+            format_bytes(item.size_bytes),
+            "yes" if item.safe_to_delete else "no",
+            item.recommendation,
+        )
+    console.print(table)
+
+
+def categories_for_mode(mode: str | None) -> set[InsightCategory] | None:
+    if mode == "temp":
+        return {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT}
+    if mode == "cache":
+        return {InsightCategory.CACHE}
+    return None

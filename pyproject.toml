@@ -1,0 +1,61 @@
+[project]
+name = "diskanalysis"
+version = "0.1.0"
+description = "Production-grade terminal disk analyzer"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "typer>=0.12.0",
+  "rich>=13.9.0",
+  "textual>=0.89.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "basedpyright>=1.37.1",
+]
+
+[project.scripts]
+diskanalysis = "diskanalysis.cli.app:cli"
+
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.basedpyright]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
+reportImplicitOverride = true
+reportIncompatibleMethodOverride = true
+reportImplicitStringConcatenation = true
+reportCallInDefaultInitializer = "warning"
+reportMissingParameterType = "warning"
+reportUnnecessaryCast = true
+reportAny = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportMissingTypeStubs = "warning"
+reportPrivateUsage = "error"
+reportUnnecessaryIsInstance = false
+
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+extraPaths = ["."]
+reportPrivateUsage = false
+reportUnknownMemberType = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+reportAny = false
+reportCallInDefaultInitializer = "none"
+reportMissingParameterType = "none"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.38.0",
+]

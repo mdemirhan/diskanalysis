@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.console import Console, Group
+from rich.live import Live
+from rich.panel import Panel
+from rich.spinner import Spinner
+from rich.text import Text
+
+from diskanalysis.config.loader import load_config, sample_config_json
+from diskanalysis.models.enums import InsightCategory
+from diskanalysis.models.scan import ScanFailure, ScanOptions, ScanResult
+from diskanalysis.services.insights import filter_insights, generate_insights
+from diskanalysis.services.scanner import scan_path
+from diskanalysis.services.summary import render_focused_summary, render_summary
+from diskanalysis.ui.app import DiskAnalyzerApp
+
+console = Console()
+
+
+@dataclass(slots=True)
+class _ScanProgress:
+    current_path: str
+    files: int
+    directories: int
+    updates: int
+    start_time: float
+
+
+def _truncate_path(path: str, max_width: int = 110) -> str:
+    if len(path) <= max_width:
+        return path
+    keep = max_width - 3
+    return f"...{path[-keep:]}"
+
+
+def _render_scan_panel(progress: _ScanProgress, workers: int, phase: str) -> Panel:
+    elapsed = time.perf_counter() - progress.start_time
+    body = Group(
+        Spinner("dots", text=phase, style="bold #8abeb7"),
+        Text.from_markup(f"[#81a2be]Path:[/] {_truncate_path(progress.current_path)}"),
+        Text.from_markup(
+            f"[#b5bd68]Scanned:[/] {progress.directories:,} dirs, {progress.files:,} files"
+            + f"    [#f0c674]Workers:[/] {workers}"
+            + f"    [#de935f]Elapsed:[/] {elapsed:.1f}s"
+        ),
+    )
+    return Panel(body, title="[bold #81a2be]DiskAnalysis Startup[/]", border_style="#373b41")
+
+
+def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanResult:
+    lock = threading.Lock()
+    done = threading.Event()
+    result: ScanResult | None = None
+    progress = _ScanProgress(
+        current_path=str(path),
+        files=0,
+        directories=0,
+        updates=0,
+        start_time=time.perf_counter(),
+    )
+
+    def on_progress(current_path: str, files: int, directories: int) -> None:
+        with lock:
+            progress.current_path = current_path
+            progress.files = files
+            progress.directories = directories
+            progress.updates += 1
+
+    def scan_worker() -> None:
+        nonlocal result
+        result = scan_path(path, options, progress_callback=on_progress, workers=workers)
+        done.set()
+
+    thread = threading.Thread(target=scan_worker, daemon=True)
+    thread.start()
+
+    with Live(_render_scan_panel(progress, workers, "Scanning directory tree..."), console=console, refresh_per_second=12, transient=True) as live:
+        while not done.is_set():
+            with lock:
+                snapshot = _ScanProgress(
+                    current_path=progress.current_path,
+                    files=progress.files,
+                    directories=progress.directories,
+                    updates=progress.updates,
+                    start_time=progress.start_time,
+                )
+            live.update(_render_scan_panel(snapshot, workers, "Scanning directory tree..."))
+            time.sleep(0.08)
+
+        with lock:
+            final = _ScanProgress(
+                current_path=progress.current_path,
+                files=progress.files,
+                directories=progress.directories,
+                updates=progress.updates,
+                start_time=progress.start_time,
+            )
+        live.update(_render_scan_panel(final, workers, "Finalizing scan..."))
+
+    thread.join()
+    if result is None:
+        return ScanFailure(path=str(path), message="Scan did not complete")
+    return result
+
+
+def run(
+    path: Annotated[str, typer.Argument(help="Path to analyze.")] = ".",
+    temp: Annotated[bool, typer.Option("--temp", "-t", help="Focus on temp/build artifacts.")] = False,
+    cache: Annotated[bool, typer.Option("--cache", "-c", help="Focus on caches.")] = False,
+    summary: Annotated[bool, typer.Option("--summary", "-s", help="Render non-interactive summary.")] = False,
+    sample_config: Annotated[bool, typer.Option("--sample-config", help="Print sample config JSON.")] = False,
+) -> None:
+    if sample_config:
+        console.print(sample_config_json())
+        raise typer.Exit(0)
+
+    if temp and cache:
+        console.print("[red]Use either --temp or --cache, not both.[/]")
+        raise typer.Exit(2)
+
+    config, warning = load_config()
+    if warning:
+        console.print(f"[yellow]{warning}[/]")
+
+    scan_options = ScanOptions(
+        max_depth=config.max_depth,
+        follow_symlinks=config.follow_symlinks,
+        exclude_paths=tuple(config.exclude_paths),
+    )
+
+    scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers)
+    if isinstance(scan_result, ScanFailure):
+        console.print(f"[red]Scan failed for {scan_result.path}: {scan_result.message}[/]")
+        raise typer.Exit(1)
+
+    with console.status("[bold #8abeb7]Generating insights...[/]"):
+        bundle = generate_insights(scan_result, config)
+
+    if summary:
+        if temp:
+            focused = filter_insights(bundle, {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT})
+            safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
+            render_focused_summary(console, "Temp / Build Summary", scan_result.root.size_bytes, safe_total, focused, config.top_n)
+        elif cache:
+            focused = filter_insights(bundle, {InsightCategory.CACHE})
+            safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
+            render_focused_summary(console, "Cache Summary", scan_result.root.size_bytes, safe_total, focused, config.top_n)
+        else:
+            render_summary(console, scan_result, bundle, config)
+        raise typer.Exit(0)
+
+    initial_view = "overview"
+    if temp:
+        initial_view = "temp"
+    elif cache:
+        initial_view = "cache"
+
+    tui = DiskAnalyzerApp(scan=scan_result, bundle=bundle, config=config, initial_view=initial_view)
+    tui.run()
+
+
+def cli() -> None:
+    typer.run(run)
+
+
+if __name__ == "__main__":
+    cli()
