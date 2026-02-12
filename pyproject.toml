@@ -8,6 +8,7 @@ dependencies = [
   "typer>=0.12.0",
   "rich>=13.9.0",
   "textual>=0.89.0",
+  "result>=0.17.0",
 ]
 
 [project.optional-dependencies]
@@ -58,4 +59,5 @@ reportMissingParameterType = "none"
 [dependency-groups]
 dev = [
     "basedpyright>=1.38.0",
+    "pytest>=8.3.0",
 ]

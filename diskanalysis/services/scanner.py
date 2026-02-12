@@ -8,8 +8,20 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from result import Err, Ok
+
 from diskanalysis.models.enums import NodeKind
-from diskanalysis.models.scan import CancelCheck, ProgressCallback, ScanFailure, ScanNode, ScanOptions, ScanResult, ScanStats, ScanSuccess
+from diskanalysis.models.scan import (
+    CancelCheck,
+    ProgressCallback,
+    ScanError,
+    ScanErrorCode,
+    ScanNode,
+    ScanOptions,
+    ScanResult,
+    ScanSnapshot,
+    ScanStats,
+)
 from diskanalysis.services.patterns import matches_glob
 
 
@@ -62,15 +74,15 @@ def scan_path(
 ) -> ScanResult:
     root_path = Path(path).expanduser()
     if not root_path.exists():
-        return ScanFailure(path=str(root_path), message="Path does not exist")
+        return Err(ScanError(code=ScanErrorCode.NOT_FOUND, path=str(root_path), message="Path does not exist"))
     if not root_path.is_dir():
-        return ScanFailure(path=str(root_path), message="Path is not a directory")
+        return Err(ScanError(code=ScanErrorCode.NOT_DIRECTORY, path=str(root_path), message="Path is not a directory"))
 
     resolved_root = str(root_path.resolve())
     try:
         root_stat = root_path.stat(follow_symlinks=options.follow_symlinks)
     except OSError as exc:
-        return ScanFailure(path=resolved_root, message=f"Cannot stat root: {exc}")
+        return Err(ScanError(code=ScanErrorCode.ROOT_STAT_FAILED, path=resolved_root, message=f"Cannot stat root: {exc}"))
 
     root_node = ScanNode(
         path=resolved_root,
@@ -171,11 +183,11 @@ def scan_path(
         thread.join(timeout=0.3)
 
     if cancelled.is_set():
-        return ScanFailure(path=resolved_root, message="Scan cancelled")
+        return Err(ScanError(code=ScanErrorCode.CANCELLED, path=resolved_root, message="Scan cancelled"))
 
     _finalize_sizes(root_node)
     stats.bytes_total = root_node.size_bytes
-    return ScanSuccess(root=root_node, stats=stats)
+    return Ok(ScanSnapshot(root=root_node, stats=stats))
 
 
 async def scan_path_async(

@@ -7,7 +7,7 @@ from pathlib import Path
 from diskanalysis.config.schema import AppConfig, PatternRule
 from diskanalysis.models.enums import InsightCategory, Severity
 from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode, ScanSuccess
+from diskanalysis.models.scan import ScanNode
 from diskanalysis.services.patterns import matches_rule
 
 
@@ -76,7 +76,7 @@ def _upsert(target: dict[str, Insight], insight: Insight) -> None:
         target[insight.path] = insight
 
 
-def generate_insights(scan: ScanSuccess, config: AppConfig) -> InsightBundle:
+def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     insights: dict[str, Insight] = {}
     now = time.time()
 
@@ -200,7 +200,7 @@ def generate_insights(scan: ScanSuccess, config: AppConfig) -> InsightBundle:
             for child in node.children:
                 walk(child, _MatchState(in_temp_or_cache=local_in_temp_cache))
 
-    walk(scan.root, _MatchState(in_temp_or_cache=False))
+    walk(root, _MatchState(in_temp_or_cache=False))
 
     ordered = sorted(insights.values(), key=lambda x: x.size_bytes, reverse=True)
     reclaimable = sum(item.size_bytes for item in ordered)

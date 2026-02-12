@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from diskanalysis.models.scan import ScanFailure, ScanOptions, ScanSuccess
+from result import Err, Ok
+
+from diskanalysis.models.scan import ScanErrorCode, ScanOptions
 from diskanalysis.services.scanner import scan_path
 
 
@@ -18,17 +20,20 @@ def test_scanner_returns_valid_results(tmp_path: Path) -> None:
 
     result = scan_path(tmp_path, ScanOptions())
 
-    assert isinstance(result, ScanSuccess)
-    assert result.stats.files == 3
-    assert result.stats.directories >= 2
-    assert result.root.size_bytes == 224
+    assert isinstance(result, Ok)
+    snapshot = result.unwrap()
+    assert snapshot.stats.files == 3
+    assert snapshot.stats.directories >= 2
+    assert snapshot.root.size_bytes == 224
 
 
 def test_missing_path_returns_error(tmp_path: Path) -> None:
     result = scan_path(tmp_path / "does-not-exist", ScanOptions())
 
-    assert isinstance(result, ScanFailure)
-    assert "does not exist" in result.message.lower()
+    assert isinstance(result, Err)
+    error = result.unwrap_err()
+    assert error.code is ScanErrorCode.NOT_FOUND
+    assert "does not exist" in error.message.lower()
 
 
 def test_children_sorted_by_size_descending(tmp_path: Path) -> None:
@@ -37,9 +42,10 @@ def test_children_sorted_by_size_descending(tmp_path: Path) -> None:
     _write_file(tmp_path / "c.bin", 50)
 
     result = scan_path(tmp_path, ScanOptions())
-    assert isinstance(result, ScanSuccess)
+    assert isinstance(result, Ok)
+    snapshot = result.unwrap()
 
-    names = [child.name for child in result.root.children if not child.is_dir]
+    names = [child.name for child in snapshot.root.children if not child.is_dir]
     assert names == ["b.bin", "c.bin", "a.bin"]
 
 
@@ -47,9 +53,10 @@ def test_max_depth_respected(tmp_path: Path) -> None:
     _write_file(tmp_path / "lvl1" / "lvl2" / "f.bin", 20)
 
     result = scan_path(tmp_path, ScanOptions(max_depth=0))
-    assert isinstance(result, ScanSuccess)
+    assert isinstance(result, Ok)
+    snapshot = result.unwrap()
 
-    lvl1 = next(child for child in result.root.children if child.name == "lvl1")
+    lvl1 = next(child for child in snapshot.root.children if child.name == "lvl1")
     assert lvl1.children == []
 
 
@@ -58,9 +65,10 @@ def test_excluded_paths_respected(tmp_path: Path) -> None:
     _write_file(tmp_path / "ignore" / "skip.bin", 50)
 
     result = scan_path(tmp_path, ScanOptions(exclude_paths=("**/ignore", "**/ignore/**")))
-    assert isinstance(result, ScanSuccess)
+    assert isinstance(result, Ok)
+    snapshot = result.unwrap()
 
-    all_paths = {child.path for child in result.root.children}
+    all_paths = {child.path for child in snapshot.root.children}
     assert not any("ignore" in path for path in all_paths)
 
 
@@ -74,7 +82,7 @@ def test_progress_callback_invoked(tmp_path: Path) -> None:
         callbacks.append((path, files, directories))
 
     result = scan_path(tmp_path, ScanOptions(), progress_callback=progress)
-    assert isinstance(result, ScanSuccess)
+    assert isinstance(result, Ok)
     assert callbacks
 
 
@@ -90,5 +98,7 @@ def test_cancellation_respected(tmp_path: Path) -> None:
         return calls > 2
 
     result = scan_path(tmp_path, ScanOptions(), cancel_check=cancel)
-    assert isinstance(result, ScanFailure)
-    assert "cancel" in result.message.lower()
+    assert isinstance(result, Err)
+    error = result.unwrap_err()
+    assert error.code is ScanErrorCode.CANCELLED
+    assert "cancel" in error.message.lower()

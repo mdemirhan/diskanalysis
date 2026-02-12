@@ -14,7 +14,7 @@ from textual.widgets import DataTable, Static
 from diskanalysis.config.schema import AppConfig
 from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode, ScanSuccess
+from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes, format_ts, relative_bar
 
 
@@ -93,23 +93,25 @@ class DiskAnalyzerApp(App[None]):
 
     def __init__(
         self,
-        scan: ScanSuccess,
+        root: ScanNode,
+        stats: ScanStats,
         bundle: InsightBundle,
         config: AppConfig,
         initial_view: str = "overview",
     ) -> None:
         super().__init__()
-        self.scan = scan
+        self.root = root
+        self.stats = stats
         self.bundle = bundle
         self.config = config
         self.current_view = initial_view if initial_view in TABS else "overview"
 
         self.node_by_path: dict[str, ScanNode] = {}
         self.parent_by_path: dict[str, str] = {}
-        self._index_tree(self.scan.root, parent=None)
+        self._index_tree(self.root, parent=None)
 
-        self.browse_root_path = self.scan.root.path
-        self.expanded: set[str] = {self.scan.root.path}
+        self.browse_root_path = self.root.path
+        self.expanded: set[str] = {self.root.path}
 
         self.rows: list[DisplayRow] = []
         self.selected_index = 0
@@ -171,11 +173,11 @@ class DiskAnalyzerApp(App[None]):
             Text.from_markup(
                 (
                     "[bold #8abeb7]DiskAnalysis[/]  [#969896]Terminal Disk Intelligence[/]"
-                    f"    [bold #f0c674]Total:[/] [bold #de935f]{format_bytes(self.scan.root.size_bytes)}[/]"
+                    f"    [bold #f0c674]Total:[/] [bold #de935f]{format_bytes(self.root.size_bytes)}[/]"
                 )
             )
         )
-        self.query_one("#path-row", Static).update(Text.from_markup(f"[#81a2be]Path:[/] {self.scan.root.path}"))
+        self.query_one("#path-row", Static).update(Text.from_markup(f"[#81a2be]Path:[/] {self.root.path}"))
 
         tab_items: list[str] = []
         for tab in TABS:
@@ -188,8 +190,8 @@ class DiskAnalyzerApp(App[None]):
 
         if self.current_view == "browse":
             rel = (
-                Path(self.browse_root_path).relative_to(Path(self.scan.root.path))
-                if self.browse_root_path != self.scan.root.path
+                Path(self.browse_root_path).relative_to(Path(self.root.path))
+                if self.browse_root_path != self.root.path
                 else Path(".")
             )
             depth = 0 if str(rel) == "." else len(rel.parts)
@@ -211,7 +213,7 @@ class DiskAnalyzerApp(App[None]):
         if not self.rows:
             self.rows = [DisplayRow(path=".", name="(no data)", size_bytes=0, right="-")]
 
-        total = max(1, self.rows[0].size_bytes if self.current_view == "browse" else self.scan.root.size_bytes)
+        total = max(1, self.rows[0].size_bytes if self.current_view == "browse" else self.root.size_bytes)
         for row in self.rows:
             table.add_row(row.name, format_bytes(row.size_bytes), relative_bar(row.size_bytes, total, 18), row.right)
 
@@ -257,8 +259,8 @@ class DiskAnalyzerApp(App[None]):
 
     def _overview_rows(self) -> list[DisplayRow]:
         rows: list[DisplayRow] = [
-            DisplayRow(path="stats.files", name=f"Files: {self.scan.stats.files}", size_bytes=0, right="STAT"),
-            DisplayRow(path="stats.dirs", name=f"Directories: {self.scan.stats.directories}", size_bytes=0, right="STAT"),
+            DisplayRow(path="stats.files", name=f"Files: {self.stats.files}", size_bytes=0, right="STAT"),
+            DisplayRow(path="stats.dirs", name=f"Directories: {self.stats.directories}", size_bytes=0, right="STAT"),
             DisplayRow(path="stats.insights", name=f"Insights: {len(self.bundle.insights)}", size_bytes=0, right="STAT"),
             DisplayRow(
                 path="stats.safe",
@@ -275,7 +277,7 @@ class DiskAnalyzerApp(App[None]):
         ]
 
         top_items = sorted(self.node_by_path.values(), key=lambda x: x.size_bytes, reverse=True)
-        for node in [item for item in top_items if item.path != self.scan.root.path][: self.config.top_n]:
+        for node in [item for item in top_items if item.path != self.root.path][: self.config.top_n]:
             typ = "DIR" if node.kind is NodeKind.DIRECTORY else "FILE"
             rows.append(DisplayRow(path=node.path, name=f"{node.name}", size_bytes=node.size_bytes, right=typ))
         return rows
@@ -285,7 +287,7 @@ class DiskAnalyzerApp(App[None]):
         if self._browse_cached_signature == signature and self._browse_cached_rows is not None:
             return self._browse_cached_rows
 
-        root = self.node_by_path.get(self.browse_root_path, self.scan.root)
+        root = self.node_by_path.get(self.browse_root_path, self.root)
         rows: list[DisplayRow] = []
 
         def walk(node: ScanNode, depth: int) -> None:
@@ -431,7 +433,7 @@ class DiskAnalyzerApp(App[None]):
     def _drill_out(self) -> None:
         if self.current_view != "browse":
             return
-        if self.browse_root_path == self.scan.root.path:
+        if self.browse_root_path == self.root.path:
             return
         parent = self.parent_by_path.get(self.browse_root_path)
         if parent is None:

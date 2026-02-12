@@ -9,7 +9,7 @@ from rich.table import Table
 from diskanalysis.config.schema import AppConfig
 from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode, ScanSuccess
+from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes
 
 
@@ -25,12 +25,11 @@ def _top_consumers(root: ScanNode, top_n: int) -> list[ScanNode]:
     return items[:top_n]
 
 
-def _stats_panel(scan: ScanSuccess, bundle: InsightBundle) -> Panel:
-    stats = scan.stats
+def _stats_panel(root: ScanNode, stats: ScanStats, bundle: InsightBundle) -> Panel:
     body = (
         f"Files: [bold]{stats.files}[/bold]\n"
         f"Directories: [bold]{stats.directories}[/bold]\n"
-        f"Total Size: [bold]{format_bytes(scan.root.size_bytes)}[/bold]\n"
+        f"Total Size: [bold]{format_bytes(root.size_bytes)}[/bold]\n"
         f"Insights: [bold]{len(bundle.insights)}[/bold]\n"
         f"Reclaimable: [bold]{format_bytes(bundle.reclaimable_bytes)}[/bold]\n"
         f"Safe to Delete: [bold]{format_bytes(bundle.safe_reclaimable_bytes)}[/bold]\n"
@@ -39,15 +38,15 @@ def _stats_panel(scan: ScanSuccess, bundle: InsightBundle) -> Panel:
     return Panel(body, title="Scan Summary", border_style="blue")
 
 
-def render_summary(console: Console, scan: ScanSuccess, bundle: InsightBundle, config: AppConfig) -> None:
-    console.print(_stats_panel(scan, bundle))
+def render_summary(console: Console, root: ScanNode, stats: ScanStats, bundle: InsightBundle, config: AppConfig) -> None:
+    console.print(_stats_panel(root, stats, bundle))
 
     top_table = Table(title="Top Space Consumers", header_style="bold cyan")
     top_table.add_column("Path")
     top_table.add_column("Type", justify="center")
     top_table.add_column("Size", justify="right")
 
-    for node in _top_consumers(scan.root, config.top_n):
+    for node in _top_consumers(root, config.top_n):
         top_table.add_row(node.path, "DIR" if node.kind is NodeKind.DIRECTORY else "FILE", format_bytes(node.size_bytes))
     console.print(top_table)
 

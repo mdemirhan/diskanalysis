@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Callable
+
+from result import Result
 
 from diskanalysis.models.enums import NodeKind
 
@@ -40,19 +43,28 @@ class ScanOptions:
     exclude_paths: tuple[str, ...] = ()
 
 
-@dataclass(slots=True)
-class ScanSuccess:
+@dataclass(slots=True, frozen=True)
+class ScanSnapshot:
     root: ScanNode
     stats: ScanStats
 
 
-@dataclass(slots=True)
-class ScanFailure:
+class ScanErrorCode(str, Enum):
+    NOT_FOUND = "not_found"
+    NOT_DIRECTORY = "not_directory"
+    ROOT_STAT_FAILED = "root_stat_failed"
+    CANCELLED = "cancelled"
+    INTERNAL = "internal"
+
+
+@dataclass(slots=True, frozen=True)
+class ScanError:
+    code: ScanErrorCode
     path: str
     message: str
 
 
-ScanResult = ScanSuccess | ScanFailure
+ScanResult = Result[ScanSnapshot, ScanError]
 
 
 def normalize_path(path: str | Path) -> str:

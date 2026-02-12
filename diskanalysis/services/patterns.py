@@ -22,8 +22,9 @@ def _expand_braces(pattern: str) -> list[str]:
 
 def _match_pattern(pattern: str, normalized_path: str, basename: str) -> bool:
     if pattern.endswith("/**"):
-        base = pattern[: -len("/**")]
-        if normalized_path == base or normalized_path.startswith(f"{base}/"):
+        # Treat `.../**` as matching the directory itself and descendants.
+        base_pattern = pattern[: -len("/**")]
+        if fnmatch(normalized_path, base_pattern):
             return True
     if fnmatch(normalized_path, pattern):
         return True

@@ -12,10 +12,12 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
+from result import Err, Ok
 
+from diskanalysis.config.defaults import default_config
 from diskanalysis.config.loader import load_config, sample_config_json
 from diskanalysis.models.enums import InsightCategory
-from diskanalysis.models.scan import ScanFailure, ScanOptions, ScanResult
+from diskanalysis.models.scan import ScanError, ScanErrorCode, ScanOptions, ScanResult
 from diskanalysis.services.insights import filter_insights, generate_insights
 from diskanalysis.services.scanner import scan_path
 from diskanalysis.services.summary import render_focused_summary, render_summary
@@ -106,7 +108,7 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
 
     thread.join()
     if result is None:
-        return ScanFailure(path=str(path), message="Scan did not complete")
+        return Err(ScanError(code=ScanErrorCode.INTERNAL, path=str(path), message="Scan did not complete"))
     return result
 
 
@@ -125,9 +127,14 @@ def run(
         console.print("[red]Use either --temp or --cache, not both.[/]")
         raise typer.Exit(2)
 
-    config, warning = load_config()
-    if warning:
-        console.print(f"[yellow]{warning}[/]")
+    config_result = load_config()
+    match config_result:
+        case Ok():
+            config = config_result.unwrap()
+        case Err():
+            warning = config_result.unwrap_err()
+            console.print(f"[yellow]{warning} Using defaults.[/]")
+            config = default_config()
 
     scan_options = ScanOptions(
         max_depth=config.max_depth,
@@ -136,24 +143,28 @@ def run(
     )
 
     scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers)
-    if isinstance(scan_result, ScanFailure):
-        console.print(f"[red]Scan failed for {scan_result.path}: {scan_result.message}[/]")
-        raise typer.Exit(1)
+    match scan_result:
+        case Ok():
+            snapshot = scan_result.unwrap()
+        case Err():
+            error = scan_result.unwrap_err()
+            console.print(f"[red]Scan failed for {error.path}: {error.message}[/]")
+            raise typer.Exit(1)
 
     with console.status("[bold #8abeb7]Generating insights...[/]"):
-        bundle = generate_insights(scan_result, config)
+        bundle = generate_insights(snapshot.root, config)
 
     if summary:
         if temp:
             focused = filter_insights(bundle, {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT})
             safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
-            render_focused_summary(console, "Temp / Build Summary", scan_result.root.size_bytes, safe_total, focused, config.top_n)
+            render_focused_summary(console, "Temp / Build Summary", snapshot.root.size_bytes, safe_total, focused, config.top_n)
         elif cache:
             focused = filter_insights(bundle, {InsightCategory.CACHE})
             safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
-            render_focused_summary(console, "Cache Summary", scan_result.root.size_bytes, safe_total, focused, config.top_n)
+            render_focused_summary(console, "Cache Summary", snapshot.root.size_bytes, safe_total, focused, config.top_n)
         else:
-            render_summary(console, scan_result, bundle, config)
+            render_summary(console, snapshot.root, snapshot.stats, bundle, config)
         raise typer.Exit(0)
 
     initial_view = "overview"
@@ -162,7 +173,7 @@ def run(
     elif cache:
         initial_view = "cache"
 
-    tui = DiskAnalyzerApp(scan=scan_result, bundle=bundle, config=config, initial_view=initial_view)
+    tui = DiskAnalyzerApp(root=snapshot.root, stats=snapshot.stats, bundle=bundle, config=config, initial_view=initial_view)
     tui.run()
 
 

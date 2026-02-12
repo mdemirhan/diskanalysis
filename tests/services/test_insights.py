@@ -5,7 +5,7 @@ import time
 from diskanalysis.config.defaults import default_config
 from diskanalysis.config.schema import PatternRule, Thresholds
 from diskanalysis.models.enums import InsightCategory, NodeKind, Severity
-from diskanalysis.models.scan import ScanNode, ScanStats, ScanSuccess
+from diskanalysis.models.scan import ScanNode
 from diskanalysis.services.insights import generate_insights
 
 
@@ -43,15 +43,11 @@ def _dir(path: str, size: int, *children: ScanNode) -> ScanNode:
     )
 
 
-def _scan(root: ScanNode) -> ScanSuccess:
-    return ScanSuccess(root=root, stats=ScanStats(files=0, directories=0, bytes_total=root.size_bytes, access_errors=0))
-
-
 def test_temp_analyzer_path_matching_and_threshold_logic() -> None:
     config = default_config()
     config.thresholds = Thresholds(min_insight_mb=1)
     node = _file("/root/tmp/trace.log", size=2 * 1024 * 1024)
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.TEMP for item in bundle.insights)
 
@@ -60,7 +56,7 @@ def test_cache_analyzer_path_matching_and_threshold_logic() -> None:
     config = default_config()
     config.thresholds = Thresholds(min_insight_mb=1)
     node = _dir("/root/.cache/pip", size=3 * 1024 * 1024)
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.CACHE for item in bundle.insights)
 
@@ -69,7 +65,7 @@ def test_large_file_detection() -> None:
     config = default_config()
     config.thresholds = Thresholds(large_file_mb=1, large_dir_mb=2048, old_file_days=365, min_insight_mb=0)
     node = _file("/root/huge.dump", size=2 * 1024 * 1024)
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.LARGE_FILE for item in bundle.insights)
 
@@ -78,7 +74,7 @@ def test_build_artifact_detection() -> None:
     config = default_config()
     config.thresholds = Thresholds(min_insight_mb=1)
     node = _dir("/root/project/node_modules", 2 * 1024 * 1024, _file("/root/project/node_modules/a.js", 100))
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.BUILD_ARTIFACT for item in bundle.insights)
 
@@ -87,7 +83,7 @@ def test_dedup_by_path() -> None:
     config = default_config()
     config.thresholds = Thresholds(min_insight_mb=0)
     node = _dir("/root/__pycache__", size=100)
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     matched = [item for item in bundle.insights if item.path == "/root/__pycache__"]
     assert len(matched) == 1
@@ -98,7 +94,7 @@ def test_reclaimable_space_calculation() -> None:
     config.thresholds = Thresholds(min_insight_mb=0)
     temp = _dir("/root/tmp/cache", size=100)
     cache = _dir("/root/.cache/pip", size=200)
-    bundle = generate_insights(_scan(_tree_with(temp, cache)), config)
+    bundle = generate_insights(_tree_with(temp, cache), config)
 
     assert bundle.reclaimable_bytes >= 300
     assert bundle.safe_reclaimable_bytes > 0
@@ -109,7 +105,7 @@ def test_old_file_detection() -> None:
     config.thresholds = Thresholds(large_file_mb=1024, large_dir_mb=2048, old_file_days=10, min_insight_mb=0)
     old_ts = time.time() - (20 * 24 * 60 * 60)
     node = _file("/root/old.txt", size=100, modified=old_ts)
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.OLD_FILE for item in bundle.insights)
 
@@ -130,6 +126,6 @@ def test_custom_pattern_detection() -> None:
         )
     ]
     node = _file("/root/images/archive.iso", size=1024)
-    bundle = generate_insights(_scan(_tree_with(node)), config)
+    bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.CUSTOM for item in bundle.insights)
