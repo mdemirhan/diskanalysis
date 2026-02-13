@@ -39,7 +39,6 @@ class ScanStats:
 class ScanOptions:
     max_depth: int | None = None
     follow_symlinks: bool = False
-    exclude_paths: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)

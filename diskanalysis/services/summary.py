@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import defaultdict
+import heapq
 
 from rich.console import Console
 from rich.panel import Panel
@@ -22,9 +22,8 @@ def _iter_nodes(root: ScanNode):
 
 
 def _top_consumers(root: ScanNode, top_n: int) -> list[ScanNode]:
-    items = [node for node in _iter_nodes(root) if node.path != root.path]
-    items.sort(key=lambda n: n.size_bytes, reverse=True)
-    return items[:top_n]
+    items = (node for node in _iter_nodes(root) if node.path != root.path)
+    return heapq.nlargest(top_n, items, key=lambda n: n.size_bytes)
 
 
 def _stats_panel(root: ScanNode, stats: ScanStats) -> Panel:
@@ -59,10 +58,10 @@ def render_summary(
         )
     console.print(top_table)
 
-    by_category: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))
-    for item in bundle.insights:
-        count, total = by_category[item.category.value]
-        by_category[item.category.value] = (count + 1, total + item.size_bytes)
+    by_category: dict[str, tuple[int, int]] = {}
+    for cat, count in bundle.category_counts.items():
+        size = bundle.category_sizes.get(cat, 0)
+        by_category[cat.value] = (count, size)
 
     cat_table = Table(title="Insights by Category", header_style="bold magenta")
     cat_table.add_column("Category")

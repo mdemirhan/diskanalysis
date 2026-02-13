@@ -46,17 +46,17 @@ Config is fully rule-driven:
 - build artifact patterns
 - custom patterns
 - thresholds
-- exclude paths
 - additional temp/cache paths
-- symlink and depth controls
+- symlink traversal policy
+- depth controls
 
 ## TUI Views
 
 - `Overview`
 - `Browse`
-- `Insights`
+- `Large Dir`
+- `Large File`
 - `Temp`
-- `Cache`
 
 ## Keybindings
 
@@ -65,7 +65,7 @@ Global:
 - `q` / `Ctrl+C`: quit
 - `?`: help
 - `Tab` / `Shift+Tab`: next/previous view
-- `o`, `b`, `i`, `t`, `c`: jump to view
+- `o`, `b`, `t`, `d`, `f`: jump to view
 
 Browse:
 
@@ -78,20 +78,16 @@ Browse:
 - `G`/`End`: bottom
 - `PgUp`/`PgDn`, `Ctrl+U`/`Ctrl+D`: page
 
-Insights/Temp/Cache lists:
+Temp / large views:
 
 - `j/k`, arrows
 - `gg/G`, `Home/End`
 - `PgUp/PgDn`, `Ctrl+U/Ctrl+D`
+- `[` / `]`: prev/next Temp page
 
-Search:
+Symlink behavior:
 
-- `/`: start search
-- typing updates matches live
-- `n` / `N`: next/previous match
-- `Enter`: finish search
-- `Esc`: clear search
-- `Backspace`: edit query
+- `followSymlinks` is fixed to `false` (links are not followed).
 
 ## Test
 

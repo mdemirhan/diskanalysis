@@ -32,7 +32,6 @@ class PatternRule:
 @dataclass(slots=True)
 class AppConfig:
     thresholds: Thresholds = field(default_factory=Thresholds)
-    exclude_paths: list[str] = field(default_factory=list)
     additional_temp_paths: list[str] = field(default_factory=list)
     additional_cache_paths: list[str] = field(default_factory=list)
     temp_patterns: list[PatternRule] = field(default_factory=list)
@@ -50,7 +49,6 @@ class AppConfig:
                 "largeFileMb": self.thresholds.large_file_mb,
                 "largeDirMb": self.thresholds.large_dir_mb,
             },
-            "excludePaths": self.exclude_paths,
             "additionalTempPaths": self.additional_temp_paths,
             "additionalCachePaths": self.additional_cache_paths,
             "followSymlinks": self.follow_symlinks,
@@ -115,9 +113,6 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
 
     return AppConfig(
         thresholds=threshold_obj,
-        exclude_paths=[
-            str(x) for x in data.get("excludePaths", defaults.exclude_paths)
-        ],
         additional_temp_paths=[
             str(x)
             for x in data.get("additionalTempPaths", defaults.additional_temp_paths)

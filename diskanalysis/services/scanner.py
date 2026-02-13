@@ -20,32 +20,13 @@ from diskanalysis.models.scan import (
     ScanResult,
     ScanSnapshot,
     ScanStats,
-    norm_sep,
 )
-from diskanalysis.services.patterns import matches_glob
 
 
 @dataclass(slots=True, frozen=True)
 class _Task:
     node: ScanNode
     depth: int
-
-
-def _is_glob_pattern(value: str) -> bool:
-    return any(ch in value for ch in "*?[]{}")
-
-
-def _is_excluded(path: str, name: str, options: ScanOptions) -> bool:
-    normalized = norm_sep(path)
-    for pattern in options.exclude_paths:
-        raw = norm_sep(pattern)
-        if not _is_glob_pattern(raw):
-            raw = raw.rstrip("/")
-            if normalized == raw or normalized.startswith(f"{raw}/"):
-                return True
-        if matches_glob(raw, normalized, name):
-            return True
-    return False
 
 
 def _finalize_sizes(root: ScanNode) -> None:
@@ -79,24 +60,26 @@ def scan_path(
                 message="Path does not exist",
             )
         )
-    if not root_path.is_dir():
-        return Err(
-            ScanError(
-                code=ScanErrorCode.NOT_DIRECTORY,
-                path=str(root_path),
-                message="Path is not a directory",
-            )
-        )
 
-    resolved_root = str(root_path.resolve())
+    resolved_root = str(root_path.absolute())
+    # Symlink traversal is intentionally disabled for deterministic, cycle-safe scans.
+    follow_symlinks = False
     try:
-        root_stat = root_path.stat(follow_symlinks=options.follow_symlinks)
+        root_stat = root_path.stat(follow_symlinks=follow_symlinks)
     except OSError as exc:
         return Err(
             ScanError(
                 code=ScanErrorCode.ROOT_STAT_FAILED,
                 path=resolved_root,
                 message=f"Cannot stat root: {exc}",
+            )
+        )
+    if not statmod.S_ISDIR(root_stat.st_mode):
+        return Err(
+            ScanError(
+                code=ScanErrorCode.NOT_DIRECTORY,
+                path=resolved_root,
+                message="Path is not a directory",
             )
         )
 
@@ -148,12 +131,9 @@ def scan_path(
                             cancelled.set()
                             break
 
-                        if _is_excluded(entry.path, entry.name, options):
-                            continue
-
                         try:
                             stat_result = entry.stat(
-                                follow_symlinks=options.follow_symlinks
+                                follow_symlinks=follow_symlinks
                             )
                         except OSError:
                             with stats_lock:

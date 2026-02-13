@@ -1,43 +1,80 @@
 from __future__ import annotations
 
+import heapq
 from pathlib import Path
 
 from diskanalysis.config.schema import AppConfig, PatternRule
 from diskanalysis.models.enums import InsightCategory
 from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, norm_sep
-from diskanalysis.services.patterns import matches_rule
+from diskanalysis.services.patterns import CompiledRule, compiled_matches, compile_rules
+
+MAX_INSIGHTS_PER_CATEGORY = 1000
 
 
-def _find_rule(rules: list[PatternRule], node: ScanNode) -> PatternRule | None:
-    normalized = norm_sep(node.path)
-    for rule in rules:
-        if matches_rule(rule, normalized, node.name, node.is_dir):
-            return rule
+def _find_rule(
+    compiled: list[CompiledRule],
+    path: str,
+    basename: str,
+    is_dir: bool,
+) -> PatternRule | None:
+    for cr in compiled:
+        if compiled_matches(cr, path, basename, is_dir):
+            return cr.rule
     return None
 
 
-def _upsert(target: dict[str, Insight], insight: Insight) -> None:
-    existing = target.get(insight.path)
-    if existing is None or insight.size_bytes > existing.size_bytes:
-        target[insight.path] = insight
+# Heap entry: (size_bytes, path, Insight).  Using size as the key so the
+# smallest item sits at the top of the min-heap for efficient eviction.
+type _HeapEntry = tuple[int, str, Insight]
 
 
-def _insight_from_rule(node: ScanNode, rule: PatternRule) -> Insight:
-    return Insight(
-        path=node.path,
-        size_bytes=node.size_bytes,
-        category=rule.category,
-        safe_to_delete=rule.safe_to_delete,
-        summary=rule.name,
-        recommendation=rule.recommendation,
-        modified_ts=node.modified_ts,
-    )
+def _heap_push(
+    heap: list[_HeapEntry],
+    seen: dict[str, int],
+    insight: Insight,
+    max_size: int,
+) -> None:
+    """Push *insight* into a bounded min-heap, deduplicating by path."""
+    prev_size = seen.get(insight.path)
+    if prev_size is not None:
+        if insight.size_bytes <= prev_size:
+            return
+        # Remove old entry lazily — mark it and let eviction clean up.
+        # For simplicity we just allow duplicates in the heap and let the
+        # final extraction phase deduplicate.
+    seen[insight.path] = insight.size_bytes
+    entry: _HeapEntry = (insight.size_bytes, insight.path, insight)
+    if len(heap) < max_size:
+        heapq.heappush(heap, entry)
+    elif insight.size_bytes > heap[0][0]:
+        heapq.heapreplace(heap, entry)
 
 
 def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
-    insights: dict[str, Insight] = {}
+    # --- compile all pattern rules once ---
+    compiled_temp = compile_rules(config.temp_patterns)
+    compiled_cache = compile_rules(config.cache_patterns)
+    compiled_build = compile_rules(config.build_artifact_patterns)
+    compiled_custom = compile_rules(config.custom_patterns)
 
+    # --- per-category min-heaps ---
+    heaps: dict[InsightCategory, list[_HeapEntry]] = {
+        cat: [] for cat in InsightCategory
+    }
+    seen: dict[InsightCategory, dict[str, int]] = {cat: {} for cat in InsightCategory}
+
+    # --- aggregate counters (track *all* matches, not just top-K) ---
+    category_counts: dict[InsightCategory, int] = {}
+    category_sizes: dict[InsightCategory, int] = {}
+
+    def _record(insight: Insight) -> None:
+        cat = insight.category
+        category_counts[cat] = category_counts.get(cat, 0) + 1
+        category_sizes[cat] = category_sizes.get(cat, 0) + insight.size_bytes
+        _heap_push(heaps[cat], seen[cat], insight, MAX_INSIGHTS_PER_CATEGORY)
+
+    # --- additional user-configured paths ---
     additional_rules: list[tuple[str, PatternRule]] = []
     for category, sources in (
         (InsightCategory.TEMP, config.additional_temp_paths),
@@ -71,67 +108,98 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
                 return rule
         return None
 
+    # --- main traversal ---
     stack: list[tuple[ScanNode, bool]] = [(root, False)]
     while stack:
         node, in_temp_or_cache = stack.pop()
 
-        temp_rule = _find_rule(config.temp_patterns, node) or _check_additional(
-            node.path, InsightCategory.TEMP
-        )
-        cache_rule = _find_rule(config.cache_patterns, node) or _check_additional(
-            node.path, InsightCategory.CACHE
-        )
-        build_rule = _find_rule(config.build_artifact_patterns, node)
-        custom_rule = _find_rule(config.custom_patterns, node)
+        # Early skip: descendants of already-matched temp/cache dirs need no
+        # processing — the parent insight already has the aggregate size.
+        if in_temp_or_cache:
+            continue
 
-        local_in_temp_cache = (
-            in_temp_or_cache or temp_rule is not None or cache_rule is not None
-        )
+        path = node.path
+        basename = node.name
+        is_dir = node.is_dir
+
+        temp_rule = _find_rule(
+            compiled_temp, path, basename, is_dir
+        ) or _check_additional(path, InsightCategory.TEMP)
+        cache_rule = _find_rule(
+            compiled_cache, path, basename, is_dir
+        ) or _check_additional(path, InsightCategory.CACHE)
+        build_rule = _find_rule(compiled_build, path, basename, is_dir)
+        custom_rule = _find_rule(compiled_custom, path, basename, is_dir)
+
+        local_in_temp_cache = temp_rule is not None or cache_rule is not None
 
         for rule in (temp_rule, cache_rule, build_rule, custom_rule):
             if rule is not None:
-                _upsert(insights, _insight_from_rule(node, rule))
+                _record(_insight_from_rule(node, rule))
 
         if not local_in_temp_cache:
-            if (
-                not node.is_dir
-                and node.size_bytes >= config.thresholds.large_file_bytes
-            ):
-                _upsert(
-                    insights,
+            if not is_dir and node.size_bytes >= config.thresholds.large_file_bytes:
+                _record(
                     Insight(
-                        path=node.path,
+                        path=path,
                         size_bytes=node.size_bytes,
                         category=InsightCategory.LARGE_FILE,
                         safe_to_delete=False,
                         summary="Large file",
                         recommendation="Review whether this file is still needed.",
                         modified_ts=node.modified_ts,
-                    ),
+                    )
                 )
 
-            if node.is_dir and node.size_bytes >= config.thresholds.large_dir_bytes:
-                _upsert(
-                    insights,
+            if is_dir and node.size_bytes >= config.thresholds.large_dir_bytes:
+                _record(
                     Insight(
-                        path=node.path,
+                        path=path,
                         size_bytes=node.size_bytes,
                         category=InsightCategory.LARGE_DIRECTORY,
                         safe_to_delete=False,
                         summary="Large directory",
                         recommendation="Inspect directory contents for cleanup opportunities.",
                         modified_ts=node.modified_ts,
-                    ),
+                    )
                 )
 
-        if node.is_dir:
+        if is_dir:
             if build_rule is not None and build_rule.stop_recursion:
                 continue
             for child in reversed(node.children):
                 stack.append((child, local_in_temp_cache))
 
-    ordered = sorted(insights.values(), key=lambda x: x.size_bytes, reverse=True)
-    return InsightBundle(insights=ordered)
+    # --- merge heaps into a single sorted list, deduplicating ---
+    all_insights: list[Insight] = []
+    final_seen: set[str] = set()
+    for cat in InsightCategory:
+        # Extract largest-first from each heap.
+        entries = sorted(heaps[cat], key=lambda e: e[0], reverse=True)
+        for _, path, insight in entries:
+            if path not in final_seen:
+                final_seen.add(path)
+                all_insights.append(insight)
+
+    all_insights.sort(key=lambda x: x.size_bytes, reverse=True)
+
+    return InsightBundle(
+        insights=all_insights,
+        category_counts=category_counts,
+        category_sizes=category_sizes,
+    )
+
+
+def _insight_from_rule(node: ScanNode, rule: PatternRule) -> Insight:
+    return Insight(
+        path=node.path,
+        size_bytes=node.size_bytes,
+        category=rule.category,
+        safe_to_delete=rule.safe_to_delete,
+        summary=rule.name,
+        recommendation=rule.recommendation,
+        modified_ts=node.modified_ts,
+    )
 
 
 def filter_insights(

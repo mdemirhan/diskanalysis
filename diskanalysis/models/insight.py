@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from diskanalysis.models.enums import InsightCategory
 
@@ -19,3 +19,5 @@ class Insight:
 @dataclass(slots=True)
 class InsightBundle:
     insights: list[Insight]
+    category_counts: dict[InsightCategory, int] = field(default_factory=dict)
+    category_sizes: dict[InsightCategory, int] = field(default_factory=dict)

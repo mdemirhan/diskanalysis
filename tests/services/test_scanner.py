@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 
 from result import Err, Ok
@@ -60,20 +61,6 @@ def test_max_depth_respected(tmp_path: Path) -> None:
     assert lvl1.children == []
 
 
-def test_excluded_paths_respected(tmp_path: Path) -> None:
-    _write_file(tmp_path / "include" / "ok.bin", 10)
-    _write_file(tmp_path / "ignore" / "skip.bin", 50)
-
-    result = scan_path(
-        tmp_path, ScanOptions(exclude_paths=("**/ignore", "**/ignore/**"))
-    )
-    assert isinstance(result, Ok)
-    snapshot = result.unwrap()
-
-    all_paths = {child.path for child in snapshot.root.children}
-    assert not any("ignore" in path for path in all_paths)
-
-
 def test_progress_callback_invoked(tmp_path: Path) -> None:
     _write_file(tmp_path / "f1.bin", 1)
     _write_file(tmp_path / "f2.bin", 1)
@@ -86,6 +73,27 @@ def test_progress_callback_invoked(tmp_path: Path) -> None:
     result = scan_path(tmp_path, ScanOptions(), progress_callback=progress)
     assert isinstance(result, Ok)
     assert callbacks
+
+
+def test_symlinks_are_not_followed(tmp_path: Path) -> None:
+    target = tmp_path / "real_dir"
+    target.mkdir()
+    _write_file(target / "f.bin", 1)
+
+    link = tmp_path / "link_dir"
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is not supported in this environment")
+
+    result = scan_path(tmp_path, ScanOptions(follow_symlinks=True), workers=1)
+    assert isinstance(result, Ok)
+    snapshot = result.unwrap()
+
+    link_node = next(
+        node for node in snapshot.root.children if node.name == "link_dir"
+    )
+    assert not link_node.is_dir
 
 
 def test_cancellation_respected(tmp_path: Path) -> None:

@@ -54,7 +54,9 @@ def _render_scan_panel(progress: _ScanProgress, workers: int, phase: str) -> Pan
         ),
     )
     return Panel(
-        body, title="[bold #81a2be]DiskAnalysis Startup[/]", border_style="#373b41"
+        body,
+        title="[bold #81a2be]Disk Analysis - Scanning...[/]",
+        border_style="#373b41",
     )
 
 
@@ -162,7 +164,6 @@ def run(
     scan_options = ScanOptions(
         max_depth=config.max_depth,
         follow_symlinks=config.follow_symlinks,
-        exclude_paths=tuple(config.exclude_paths),
     )
 
     scan_result = _scan_with_progress(

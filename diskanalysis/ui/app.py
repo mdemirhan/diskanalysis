@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import heapq
 from dataclasses import dataclass
 from typing import Callable, override
 
@@ -15,6 +16,7 @@ from diskanalysis.models.enums import InsightCategory, NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes, format_ts, relative_bar
+from diskanalysis.services.insights import MAX_INSIGHTS_PER_CATEGORY
 
 
 TABS = ["overview", "browse", "temp", "large_dir", "large_file"]
@@ -22,9 +24,9 @@ TABS = ["overview", "browse", "temp", "large_dir", "large_file"]
 _TAB_LABELS: dict[str, str] = {
     "overview": "Overview",
     "browse": "Browse",
-    "temp": "Temp",
-    "large_dir": "Large Dir",
-    "large_file": "Large File",
+    "temp": "Temporary Files",
+    "large_dir": "Large Folders",
+    "large_file": "Large Files",
 }
 
 _CATEGORY_LABELS: dict[str, str] = {
@@ -35,6 +37,8 @@ _CATEGORY_LABELS: dict[str, str] = {
     "build_artifact": "Build Artifact",
     "custom": "Custom",
 }
+
+TEMP_PAGE_SIZE = 100
 
 
 @dataclass(slots=True)
@@ -81,11 +85,8 @@ class HelpOverlay(ModalScreen[None]):
                 "  Backspace: Drill out",
                 "  Space: Toggle expand/collapse",
                 "",
-                "[b #81a2be]Search[/]",
-                "  /: Start search",
-                "  n / N: Next/Prev match",
-                "  Enter: Finish search",
-                "  Esc: Clear search",
+                "[b #81a2be]Temp Pagination[/]",
+                "  [ / ]: Previous/Next page",
                 "",
                 "[b #81a2be]Other[/]",
                 "  ?: Toggle help",
@@ -131,12 +132,12 @@ class DiskAnalyzerApp(App[None]):
 
         self.rows: list[DisplayRow] = []
         self.selected_index = 0
-        self.search_mode = False
-        self.search_query = ""
-        self.search_matches: list[int] = []
-        self.search_match_cursor = -1
         self.pending_g = False
         self._rows_cache: dict[str, list[DisplayRow]] = {}
+        self._view_shown_counts: dict[str, int] = {}
+        self._temp_page_index = 0
+        self._temp_total_rows = 0
+        self._temp_all_rows_cache: list[DisplayRow] | None = None
 
     def _index_tree(self, root: ScanNode) -> None:
         stack: list[tuple[ScanNode, str | None]] = [(root, None)]
@@ -177,6 +178,11 @@ class DiskAnalyzerApp(App[None]):
 
     def _invalidate_rows(self, view: str) -> None:
         self._rows_cache.pop(view, None)
+        self._view_shown_counts.pop(view, None)
+        if view == "temp":
+            self._temp_all_rows_cache = None
+            self._temp_total_rows = 0
+            self._temp_page_index = 0
 
     def _invalidate_browse_rows(self) -> None:
         self._invalidate_rows("browse")
@@ -253,22 +259,30 @@ class DiskAnalyzerApp(App[None]):
         total_rows = len(self.rows)
         cursor = min(total_rows, self.selected_index + 1)
 
-        if self.search_mode:
-            status = f"SEARCH: /{self.search_query}  (Enter: keep, Esc: clear)"
-        else:
-            status = (
-                f"Row {cursor}/{total_rows}    "
-                "q quit | ? help | Tab views | / search | n/N next/prev | j/k move"
+        status = f"Row {cursor}/{total_rows}    q quit | ? help | Tab views | j/k move"
+        if self.current_view == "browse":
+            status += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
+        if self.current_view == "temp":
+            total_pages = max(
+                1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
             )
-            if self.current_view == "browse":
-                status += (
-                    " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
-                )
+            status += (
+                f" | \\[ prev | ] next | Page {self._temp_page_index + 1}/{total_pages}"
+            )
+        trimmed_text = self._trimmed_indicator(self.current_view)
+        if trimmed_text:
+            status += f" | {trimmed_text}"
         self.query_one("#status-row", Static).update(
             Text.from_markup(f"[#969896]{status}[/]")
         )
 
     def _build_rows_for_current_view(self) -> list[DisplayRow]:
+        if self.current_view == "temp":
+            rows = self._temp_rows()
+            self._rows_cache[self.current_view] = rows
+            self._view_shown_counts[self.current_view] = self._temp_total_rows
+            return rows
+
         cached = self._rows_cache.get(self.current_view)
         if cached is not None:
             return cached
@@ -277,17 +291,6 @@ class DiskAnalyzerApp(App[None]):
             rows = self._overview_rows()
         elif self.current_view == "browse":
             rows = self._browse_rows()
-        elif self.current_view == "temp":
-            rows = self._insight_rows(
-                lambda i: (
-                    i.category
-                    in {
-                        InsightCategory.TEMP,
-                        InsightCategory.CACHE,
-                        InsightCategory.BUILD_ARTIFACT,
-                    }
-                )
-            )
         elif self.current_view == "large_dir":
             rows = self._insight_rows(
                 lambda i: i.category is InsightCategory.LARGE_DIRECTORY
@@ -298,13 +301,94 @@ class DiskAnalyzerApp(App[None]):
             )
 
         self._rows_cache[self.current_view] = rows
+        if self.current_view in {"large_dir", "large_file"}:
+            self._view_shown_counts[self.current_view] = len(rows)
         return rows
 
-    def _category_size(self, *categories: InsightCategory) -> int:
-        cats = set(categories)
-        return sum(
-            item.size_bytes for item in self.bundle.insights if item.category in cats
+    def _temp_rows(self) -> list[DisplayRow]:
+        if self._temp_all_rows_cache is None:
+            self._temp_all_rows_cache = self._insight_rows(
+                lambda i: (
+                    i.category
+                    in {
+                        InsightCategory.TEMP,
+                        InsightCategory.CACHE,
+                        InsightCategory.BUILD_ARTIFACT,
+                    }
+                )
+            )
+            self._temp_total_rows = len(self._temp_all_rows_cache)
+
+        total_pages = max(
+            1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
         )
+        self._temp_page_index = max(0, min(self._temp_page_index, total_pages - 1))
+        start = self._temp_page_index * TEMP_PAGE_SIZE
+        end = start + TEMP_PAGE_SIZE
+        return self._temp_all_rows_cache[start:end]
+
+    def _next_temp_page(self) -> None:
+        if self.current_view != "temp":
+            return
+        total_pages = max(
+            1, (self._temp_total_rows + TEMP_PAGE_SIZE - 1) // TEMP_PAGE_SIZE
+        )
+        if self._temp_page_index >= total_pages - 1:
+            return
+        self._temp_page_index += 1
+        self.selected_index = 0
+        self._rows_cache.pop("temp", None)
+        self._refresh_all()
+
+    def _prev_temp_page(self) -> None:
+        if self.current_view != "temp":
+            return
+        if self._temp_page_index == 0:
+            return
+        self._temp_page_index -= 1
+        self.selected_index = 0
+        self._rows_cache.pop("temp", None)
+        self._refresh_all()
+
+    def _view_categories(self, view: str) -> tuple[InsightCategory, ...]:
+        if view == "temp":
+            return (
+                InsightCategory.TEMP,
+                InsightCategory.CACHE,
+                InsightCategory.BUILD_ARTIFACT,
+            )
+        if view == "large_dir":
+            return (InsightCategory.LARGE_DIRECTORY,)
+        if view == "large_file":
+            return (InsightCategory.LARGE_FILE,)
+        return ()
+
+    def _trimmed_indicator(self, view: str) -> str:
+        categories = self._view_categories(view)
+        if not categories:
+            return ""
+
+        total = sum(self.bundle.category_counts.get(cat, 0) for cat in categories)
+        if total == 0:
+            return ""
+
+        trimmed = any(
+            self.bundle.category_counts.get(cat, 0) > MAX_INSIGHTS_PER_CATEGORY
+            for cat in categories
+        )
+        if not trimmed:
+            return ""
+
+        shown = self._view_shown_counts.get(view)
+        if shown is None:
+            shown = len(
+                [item for item in self.bundle.insights if item.category in categories]
+            )
+            self._view_shown_counts[view] = shown
+        return f"Showing {shown:,} of {total:,} results"
+
+    def _category_size(self, *categories: InsightCategory) -> int:
+        return sum(self.bundle.category_sizes.get(cat, 0) for cat in categories)
 
     def _overview_rows(self) -> list[DisplayRow]:
         temp_size = self._category_size(InsightCategory.TEMP)
@@ -356,15 +440,15 @@ class DiskAnalyzerApp(App[None]):
             ),
         ]
 
-        top_dirs = sorted(
+        top_dirs = heapq.nlargest(
+            20,
             (
                 n
                 for n in self.node_by_path.values()
                 if n.is_dir and n.path != self.root.path
             ),
             key=lambda x: x.size_bytes,
-            reverse=True,
-        )[:20]
+        )
         for node in top_dirs:
             rows.append(
                 DisplayRow(
@@ -401,8 +485,8 @@ class DiskAnalyzerApp(App[None]):
         return rows
 
     def _insight_rows(self, predicate: Callable[[Insight], bool]) -> list[DisplayRow]:
-        rows: list[DisplayRow] = []
         root_prefix = self.root.path.rstrip("/") + "/"
+        rows: list[DisplayRow] = []
         for item in [x for x in self.bundle.insights if predicate(x)]:
             display_path = (
                 item.path[len(root_prefix) :]
@@ -425,6 +509,9 @@ class DiskAnalyzerApp(App[None]):
             return
         self.current_view = view
         self.selected_index = 0
+        if view == "temp":
+            self._temp_page_index = 0
+            self._rows_cache.pop("temp", None)
         self.pending_g = False
         self._refresh_all()
 
@@ -553,36 +640,6 @@ class DiskAnalyzerApp(App[None]):
                 break
         self._refresh_all()
 
-    def _update_search_matches(self) -> None:
-        query = self.search_query.strip().lower()
-        if not query:
-            self.search_matches = []
-            self.search_match_cursor = -1
-            return
-
-        self.search_matches = [
-            idx
-            for idx, row in enumerate(self.rows)
-            if query in row.name.lower() or query in row.path.lower()
-        ]
-        self.search_match_cursor = 0 if self.search_matches else -1
-        if self.search_match_cursor >= 0:
-            self.selected_index = self.search_matches[self.search_match_cursor]
-
-    def _goto_next_match(self, backward: bool = False) -> None:
-        if not self.search_matches:
-            return
-        if backward:
-            self.search_match_cursor = (self.search_match_cursor - 1) % len(
-                self.search_matches
-            )
-        else:
-            self.search_match_cursor = (self.search_match_cursor + 1) % len(
-                self.search_matches
-            )
-        self.selected_index = self.search_matches[self.search_match_cursor]
-        self._refresh_all()
-
     @on(DataTable.RowSelected)
     def _on_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.cursor_row != self.selected_index:
@@ -594,33 +651,6 @@ class DiskAnalyzerApp(App[None]):
         if event.cursor_row != self.selected_index:
             self.selected_index = event.cursor_row
             self._render_footer_rows()
-
-    def _handle_search_input(self, event) -> None:  # type: ignore[no-untyped-def]
-        key = event.key
-        if key == "enter":
-            self.search_mode = False
-            self._refresh_all()
-            event.stop()
-            return
-        if key == "escape":
-            self.search_mode = False
-            self.search_query = ""
-            self.search_matches = []
-            self.search_match_cursor = -1
-            self._refresh_all()
-            event.stop()
-            return
-        if key == "backspace":
-            self.search_query = self.search_query[:-1]
-            self._update_search_matches()
-            self._refresh_all()
-            event.stop()
-            return
-        if event.character and event.is_printable:
-            self.search_query += event.character
-            self._update_search_matches()
-            self._refresh_all()
-            event.stop()
 
     def _handle_global_key(self, key: str) -> bool:
         if key in {"q", "ctrl+c"}:
@@ -702,32 +732,17 @@ class DiskAnalyzerApp(App[None]):
         key = event.key
         char = event.character or ""
 
-        if self.search_mode:
-            self._handle_search_input(event)
-            return
-
         if self._handle_global_key(key):
             return
         if self._handle_navigation_key(key, char):
             return
-
-        if key == "/":
-            self.search_mode = True
-            self.search_query = ""
-            self.search_matches = []
-            self.search_match_cursor = -1
-            self._refresh_all()
-            return
-
-        if (key in {"n", "N", "shift+n"} or char in {"n", "N"}) and self.search_query:
-            self._goto_next_match(backward=(key in {"N", "shift+n"} or char == "N"))
-            return
+        if self.current_view == "temp":
+            if key == "left_square_bracket" or char == "[":
+                self._prev_temp_page()
+                return
+            if key == "right_square_bracket" or char == "]":
+                self._next_temp_page()
+                return
 
         if self.current_view == "browse" and self._handle_browse_key(key):
             return
-
-        if key == "escape" and self.search_query:
-            self.search_query = ""
-            self.search_matches = []
-            self.search_match_cursor = -1
-            self._refresh_all()

@@ -463,7 +463,6 @@ def default_config() -> AppConfig:
 
     return AppConfig(
         thresholds=Thresholds(),
-        exclude_paths=["**/.git/**", "**/.hg/**", "**/.svn/**"],
         additional_temp_paths=[
             f"{home}/Library/Caches/TemporaryItems",
             f"{home}/.Trash",
