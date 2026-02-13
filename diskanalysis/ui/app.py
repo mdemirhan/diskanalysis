@@ -108,7 +108,7 @@ class DiskAnalyzerApp(App[None]):
 
         self.node_by_path: dict[str, ScanNode] = {}
         self.parent_by_path: dict[str, str] = {}
-        self._index_tree(self.root, parent=None)
+        self._index_tree(self.root)
 
         self.browse_root_path = self.root.path
         self.expanded: set[str] = {self.root.path}
@@ -121,16 +121,16 @@ class DiskAnalyzerApp(App[None]):
         self.search_match_cursor = -1
         self.pending_g = False
         self._rows_cache: dict[str, list[DisplayRow]] = {}
-        self._browse_cache_version = 0
-        self._browse_cached_signature: tuple[str, int] | None = None
-        self._browse_cached_rows: list[DisplayRow] | None = None
 
-    def _index_tree(self, node: ScanNode, parent: str | None) -> None:
-        self.node_by_path[node.path] = node
-        if parent is not None:
-            self.parent_by_path[node.path] = parent
-        for child in node.children:
-            self._index_tree(child, node.path)
+    def _index_tree(self, root: ScanNode) -> None:
+        stack: list[tuple[ScanNode, str | None]] = [(root, None)]
+        while stack:
+            node, parent = stack.pop()
+            self.node_by_path[node.path] = node
+            if parent is not None:
+                self.parent_by_path[node.path] = parent
+            for child in node.children:
+                stack.append((child, node.path))
 
     @override
     def compose(self) -> ComposeResult:
@@ -163,9 +163,6 @@ class DiskAnalyzerApp(App[None]):
         self._rows_cache.pop(view, None)
 
     def _invalidate_browse_rows(self) -> None:
-        self._browse_cache_version += 1
-        self._browse_cached_signature = None
-        self._browse_cached_rows = None
         self._invalidate_rows("browse")
 
     def _render_header_rows(self) -> None:
@@ -177,7 +174,9 @@ class DiskAnalyzerApp(App[None]):
                 )
             )
         )
-        self.query_one("#path-row", Static).update(Text.from_markup(f"[#81a2be]Path:[/] {self.root.path}"))
+        self.query_one("#path-row", Static).update(
+            Text.from_markup(f"[#81a2be]Path:[/] {self.root.path}")
+        )
 
         tab_items: list[str] = []
         for tab in TABS:
@@ -186,7 +185,9 @@ class DiskAnalyzerApp(App[None]):
                 tab_items.append(f"[bold #1d1f21 on #b5bd68] {label} [/] ")
             else:
                 tab_items.append(f"[#c5c8c6 on #373b41] {label} [/] ")
-        self.query_one("#tabs-row", Static).update(Text.from_markup(" ".join(tab_items)))
+        self.query_one("#tabs-row", Static).update(
+            Text.from_markup(" ".join(tab_items))
+        )
 
         if self.current_view == "browse":
             rel = (
@@ -198,10 +199,14 @@ class DiskAnalyzerApp(App[None]):
             crumbs = [part for part in rel.parts if part not in {"."}]
             crumb_text = " / ".join(crumbs) if crumbs else "/"
             self.query_one("#breadcrumb-row", Static).update(
-                Text.from_markup(f"[#8abeb7]Browse:[/] {crumb_text}    [#969896]Depth {depth}[/]")
+                Text.from_markup(
+                    f"[#8abeb7]Browse:[/] {crumb_text}    [#969896]Depth {depth}[/]"
+                )
             )
         else:
-            self.query_one("#breadcrumb-row", Static).update(Text.from_markup(f"[#8abeb7]View:[/] {self.current_view.capitalize()}"))
+            self.query_one("#breadcrumb-row", Static).update(
+                Text.from_markup(f"[#8abeb7]View:[/] {self.current_view.capitalize()}")
+            )
 
     def _render_content_table(self) -> None:
         table = self.query_one("#content-table", DataTable)
@@ -211,11 +216,23 @@ class DiskAnalyzerApp(App[None]):
 
         self.rows = self._build_rows_for_current_view()
         if not self.rows:
-            self.rows = [DisplayRow(path=".", name="(no data)", size_bytes=0, right="-")]
+            self.rows = [
+                DisplayRow(path=".", name="(no data)", size_bytes=0, right="-")
+            ]
 
-        total = max(1, self.rows[0].size_bytes if self.current_view == "browse" else self.root.size_bytes)
+        total = max(
+            1,
+            self.rows[0].size_bytes
+            if self.current_view == "browse"
+            else self.root.size_bytes,
+        )
         for row in self.rows:
-            table.add_row(row.name, format_bytes(row.size_bytes), relative_bar(row.size_bytes, total, 18), row.right)
+            table.add_row(
+                row.name,
+                format_bytes(row.size_bytes),
+                relative_bar(row.size_bytes, total, 18),
+                row.right,
+            )
 
         self.selected_index = max(0, min(self.selected_index, len(self.rows) - 1))
         table.move_cursor(row=self.selected_index, animate=False)
@@ -228,15 +245,21 @@ class DiskAnalyzerApp(App[None]):
             + f"    Reclaimable: {format_bytes(self.bundle.reclaimable_bytes)}"
             + f"    Row {cursor}/{total_rows}"
         )
-        self.query_one("#info-row", Static).update(Text.from_markup(f"[#b5bd68]{info}[/]"))
+        self.query_one("#info-row", Static).update(
+            Text.from_markup(f"[#b5bd68]{info}[/]")
+        )
 
         if self.search_mode:
             status = f"SEARCH: /{self.search_query}  (Enter: keep, Esc: clear)"
         else:
             status = "q quit | ? help | Tab views | / search | n/N next/prev | j/k move"
             if self.current_view == "browse":
-                status += " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
-        self.query_one("#status-row", Static).update(Text.from_markup(f"[#969896]{status}[/]"))
+                status += (
+                    " | h/l collapse-expand | Enter drill-in | Backspace drill-out"
+                )
+        self.query_one("#status-row", Static).update(
+            Text.from_markup(f"[#969896]{status}[/]")
+        )
 
     def _build_rows_for_current_view(self) -> list[DisplayRow]:
         cached = self._rows_cache.get(self.current_view)
@@ -250,7 +273,11 @@ class DiskAnalyzerApp(App[None]):
         elif self.current_view == "insights":
             rows = self._insight_rows(lambda _: True)
         elif self.current_view == "temp":
-            rows = self._insight_rows(lambda i: i.category in {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT})
+            rows = self._insight_rows(
+                lambda i: (
+                    i.category in {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT}
+                )
+            )
         else:
             rows = self._insight_rows(lambda i: i.category is InsightCategory.CACHE)
 
@@ -259,9 +286,24 @@ class DiskAnalyzerApp(App[None]):
 
     def _overview_rows(self) -> list[DisplayRow]:
         rows: list[DisplayRow] = [
-            DisplayRow(path="stats.files", name=f"Files: {self.stats.files}", size_bytes=0, right="STAT"),
-            DisplayRow(path="stats.dirs", name=f"Directories: {self.stats.directories}", size_bytes=0, right="STAT"),
-            DisplayRow(path="stats.insights", name=f"Insights: {len(self.bundle.insights)}", size_bytes=0, right="STAT"),
+            DisplayRow(
+                path="stats.files",
+                name=f"Files: {self.stats.files}",
+                size_bytes=0,
+                right="STAT",
+            ),
+            DisplayRow(
+                path="stats.dirs",
+                name=f"Directories: {self.stats.directories}",
+                size_bytes=0,
+                right="STAT",
+            ),
+            DisplayRow(
+                path="stats.insights",
+                name=f"Insights: {len(self.bundle.insights)}",
+                size_bytes=0,
+                right="STAT",
+            ),
             DisplayRow(
                 path="stats.safe",
                 name=f"Safe to delete: {format_bytes(self.bundle.safe_reclaimable_bytes)}",
@@ -276,35 +318,45 @@ class DiskAnalyzerApp(App[None]):
             ),
         ]
 
-        top_items = sorted(self.node_by_path.values(), key=lambda x: x.size_bytes, reverse=True)
-        for node in [item for item in top_items if item.path != self.root.path][: self.config.top_n]:
+        top_items = sorted(
+            self.node_by_path.values(), key=lambda x: x.size_bytes, reverse=True
+        )
+        for node in [item for item in top_items if item.path != self.root.path][
+            : self.config.top_n
+        ]:
             typ = "DIR" if node.kind is NodeKind.DIRECTORY else "FILE"
-            rows.append(DisplayRow(path=node.path, name=f"{node.name}", size_bytes=node.size_bytes, right=typ))
+            rows.append(
+                DisplayRow(
+                    path=node.path,
+                    name=f"{node.name}",
+                    size_bytes=node.size_bytes,
+                    right=typ,
+                )
+            )
         return rows
 
     def _browse_rows(self) -> list[DisplayRow]:
-        signature = (self.browse_root_path, self._browse_cache_version)
-        if self._browse_cached_signature == signature and self._browse_cached_rows is not None:
-            return self._browse_cached_rows
-
-        root = self.node_by_path.get(self.browse_root_path, self.root)
+        browse_root = self.node_by_path.get(self.browse_root_path, self.root)
         rows: list[DisplayRow] = []
-
-        def walk(node: ScanNode, depth: int) -> None:
+        stack: list[tuple[ScanNode, int]] = [(browse_root, 0)]
+        while stack:
+            node, depth = stack.pop()
             if node.kind is NodeKind.DIRECTORY:
                 marker = "▼" if node.path in self.expanded else "▶"
                 label = f"{'  ' * depth}{marker} {node.name}"
             else:
                 label = f"{'  ' * depth}  {node.name}"
-            rows.append(DisplayRow(path=node.path, name=label, size_bytes=node.size_bytes, right=format_ts(node.modified_ts)))
-
+            rows.append(
+                DisplayRow(
+                    path=node.path,
+                    name=label,
+                    size_bytes=node.size_bytes,
+                    right=format_ts(node.modified_ts),
+                )
+            )
             if node.kind is NodeKind.DIRECTORY and node.path in self.expanded:
-                for child in node.children:
-                    walk(child, depth + 1)
-
-        walk(root, 0)
-        self._browse_cached_signature = signature
-        self._browse_cached_rows = rows
+                for child in reversed(node.children):
+                    stack.append((child, depth + 1))
         return rows
 
     def _insight_rows(self, predicate: Callable[[Insight], bool]) -> list[DisplayRow]:
@@ -393,7 +445,12 @@ class DiskAnalyzerApp(App[None]):
             return
 
         node = self.node_by_path.get(path)
-        if node is not None and node.kind is NodeKind.DIRECTORY and path in self.expanded and path != self.browse_root_path:
+        if (
+            node is not None
+            and node.kind is NodeKind.DIRECTORY
+            and path in self.expanded
+            and path != self.browse_root_path
+        ):
             self.expanded.remove(path)
             self._invalidate_browse_rows()
             self._refresh_all()
@@ -442,8 +499,7 @@ class DiskAnalyzerApp(App[None]):
         self.browse_root_path = parent
         self.selected_index = 0
         self._invalidate_browse_rows()
-        self._refresh_all()
-        for idx, row in enumerate(self.rows):
+        for idx, row in enumerate(self._build_rows_for_current_view()):
             if row.path == old_root:
                 self.selected_index = idx
                 break
@@ -469,9 +525,13 @@ class DiskAnalyzerApp(App[None]):
         if not self.search_matches:
             return
         if backward:
-            self.search_match_cursor = (self.search_match_cursor - 1) % len(self.search_matches)
+            self.search_match_cursor = (self.search_match_cursor - 1) % len(
+                self.search_matches
+            )
         else:
-            self.search_match_cursor = (self.search_match_cursor + 1) % len(self.search_matches)
+            self.search_match_cursor = (self.search_match_cursor + 1) % len(
+                self.search_matches
+            )
         self.selected_index = self.search_matches[self.search_match_cursor]
         self._refresh_all()
 
@@ -487,79 +547,77 @@ class DiskAnalyzerApp(App[None]):
             self.selected_index = event.cursor_row
             self._render_footer_rows()
 
-    @override
-    def on_key(self, event) -> None:  # type: ignore[override]
+    def _handle_search_input(self, event) -> None:  # type: ignore[no-untyped-def]
         key = event.key
-        char = event.character or ""
+        if key == "enter":
+            self.search_mode = False
+            self._refresh_all()
+            event.stop()
+            return
+        if key == "escape":
+            self.search_mode = False
+            self.search_query = ""
+            self.search_matches = []
+            self.search_match_cursor = -1
+            self._refresh_all()
+            event.stop()
+            return
+        if key == "backspace":
+            self.search_query = self.search_query[:-1]
+            self._update_search_matches()
+            self._refresh_all()
+            event.stop()
+            return
+        if event.character and event.is_printable:
+            self.search_query += event.character
+            self._update_search_matches()
+            self._refresh_all()
+            event.stop()
 
-        if self.search_mode:
-            if key == "enter":
-                self.search_mode = False
-                self._refresh_all()
-                event.stop()
-                return
-            if key == "escape":
-                self.search_mode = False
-                self.search_query = ""
-                self.search_matches = []
-                self.search_match_cursor = -1
-                self._refresh_all()
-                event.stop()
-                return
-            if key == "backspace":
-                self.search_query = self.search_query[:-1]
-                self._update_search_matches()
-                self._refresh_all()
-                event.stop()
-                return
-            if event.character and event.is_printable:
-                self.search_query += event.character
-                self._update_search_matches()
-                self._refresh_all()
-                event.stop()
-                return
-
+    def _handle_global_key(self, key: str) -> bool:
         if key in {"q", "ctrl+c"}:
             self.exit()
-            return
+            return True
         if key == "question_mark":
             self.push_screen(HelpOverlay())
-            return
+            return True
         if key == "tab":
             self._set_view(TABS[(TABS.index(self.current_view) + 1) % len(TABS)])
-            return
+            return True
         if key in {"shift+tab", "backtab"}:
             self._set_view(TABS[(TABS.index(self.current_view) - 1) % len(TABS)])
-            return
+            return True
         if key in {"o", "b", "i", "t", "c"}:
-            mapping = {"o": "overview", "b": "browse", "i": "insights", "t": "temp", "c": "cache"}
+            mapping = {
+                "o": "overview",
+                "b": "browse",
+                "i": "insights",
+                "t": "temp",
+                "c": "cache",
+            }
             self._set_view(mapping[key])
-            return
+            return True
+        return False
 
+    def _handle_navigation_key(self, key: str, char: str) -> bool:
         if key == "j":
             self._move_selection(1)
-            return
+            return True
         if key == "k":
             self._move_selection(-1)
-            return
-        if key == "ctrl+d":
+            return True
+        if key in {"ctrl+d", "pagedown"}:
             self._move_selection(10)
-            return
-        if key == "ctrl+u":
+            return True
+        if key in {"ctrl+u", "pageup"}:
             self._move_selection(-10)
-            return
-        if key in {"pagedown"}:
-            self._move_selection(10)
-            return
-        if key in {"pageup"}:
-            self._move_selection(-10)
-            return
+            return True
         if key in {"home", "ctrl+home"}:
             self._move_top()
-            return
+            return True
         if key in {"end", "ctrl+end"}:
             self._move_bottom()
-            return
+            return True
         if key == "g" or char == "g":
             if self.pending_g:
                 self.pending_g = False
@@ -567,9 +625,42 @@ class DiskAnalyzerApp(App[None]):
             else:
                 self.pending_g = True
                 self.set_timer(0.5, lambda: setattr(self, "pending_g", False))
-            return
+            return True
         if key in {"G", "shift+g"} or char == "G":
             self._move_bottom()
+            return True
+        return False
+
+    def _handle_browse_key(self, key: str) -> bool:
+        if key in {"h", "left"}:
+            self._collapse_or_parent()
+            return True
+        if key in {"l", "right"}:
+            self._expand_or_drill()
+            return True
+        if key == "space":
+            self._toggle_expand()
+            return True
+        if key == "enter":
+            self._expand_or_drill()
+            return True
+        if key == "backspace":
+            self._drill_out()
+            return True
+        return False
+
+    @override
+    def on_key(self, event) -> None:  # type: ignore[override]
+        key = event.key
+        char = event.character or ""
+
+        if self.search_mode:
+            self._handle_search_input(event)
+            return
+
+        if self._handle_global_key(key):
+            return
+        if self._handle_navigation_key(key, char):
             return
 
         if key == "/":
@@ -584,22 +675,8 @@ class DiskAnalyzerApp(App[None]):
             self._goto_next_match(backward=(key in {"N", "shift+n"} or char == "N"))
             return
 
-        if self.current_view == "browse":
-            if key in {"h", "left"}:
-                self._collapse_or_parent()
-                return
-            if key in {"l", "right"}:
-                self._expand_or_drill()
-                return
-            if key == "space":
-                self._toggle_expand()
-                return
-            if key == "enter":
-                self._expand_or_drill()
-                return
-            if key == "backspace":
-                self._drill_out()
-                return
+        if self.current_view == "browse" and self._handle_browse_key(key):
+            return
 
         if key == "escape" and self.search_query:
             self.search_query = ""

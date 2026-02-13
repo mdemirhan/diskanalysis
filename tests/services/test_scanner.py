@@ -64,7 +64,9 @@ def test_excluded_paths_respected(tmp_path: Path) -> None:
     _write_file(tmp_path / "include" / "ok.bin", 10)
     _write_file(tmp_path / "ignore" / "skip.bin", 50)
 
-    result = scan_path(tmp_path, ScanOptions(exclude_paths=("**/ignore", "**/ignore/**")))
+    result = scan_path(
+        tmp_path, ScanOptions(exclude_paths=("**/ignore", "**/ignore/**"))
+    )
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
 

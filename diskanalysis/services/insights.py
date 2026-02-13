@@ -1,19 +1,13 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 from diskanalysis.config.schema import AppConfig, PatternRule
 from diskanalysis.models.enums import InsightCategory, Severity
 from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode
+from diskanalysis.models.scan import ScanNode, norm_sep
 from diskanalysis.services.patterns import matches_rule
-
-
-@dataclass(slots=True)
-class _MatchState:
-    in_temp_or_cache: bool
 
 
 _SEVERITY_RANK = {
@@ -24,41 +18,11 @@ _SEVERITY_RANK = {
 }
 
 
-def _norm(path: str) -> str:
-    return path.replace("\\", "/")
-
-
 def _find_rule(rules: list[PatternRule], node: ScanNode) -> PatternRule | None:
-    normalized = _norm(node.path)
+    normalized = norm_sep(node.path)
     for rule in rules:
         if matches_rule(rule, normalized, node.name, node.is_dir):
             return rule
-    return None
-
-
-def _is_under(path: str, base: str) -> bool:
-    normalized_path = _norm(path).rstrip("/")
-    normalized_base = _norm(base).rstrip("/")
-    if normalized_path == normalized_base:
-        return True
-    return normalized_path.startswith(f"{normalized_base}/")
-
-
-def _additional_path_rule(config: AppConfig, node: ScanNode, category: InsightCategory) -> PatternRule | None:
-    sources = config.additional_temp_paths if category is InsightCategory.TEMP else config.additional_cache_paths
-    for raw_base in sources:
-        base = str(Path(raw_base).expanduser())
-        if _is_under(node.path, base):
-            return PatternRule(
-                name=f"Additional {category.value} path",
-                pattern=base,
-                category=category,
-                safe_to_delete=category is InsightCategory.TEMP,
-                recommendation="Review configured path and clean safely.",
-                severity=Severity.MEDIUM,
-                apply_to="both",
-                stop_recursion=False,
-            )
     return None
 
 
@@ -76,80 +40,84 @@ def _upsert(target: dict[str, Insight], insight: Insight) -> None:
         target[insight.path] = insight
 
 
+def _insight_from_rule(node: ScanNode, rule: PatternRule) -> Insight:
+    return Insight(
+        path=node.path,
+        size_bytes=node.size_bytes,
+        category=rule.category,
+        severity=rule.severity,
+        safe_to_delete=rule.safe_to_delete,
+        summary=rule.name,
+        recommendation=rule.recommendation,
+        modified_ts=node.modified_ts,
+    )
+
+
 def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     insights: dict[str, Insight] = {}
     now = time.time()
 
-    def walk(node: ScanNode, state: _MatchState) -> None:
-        temp_rule = _find_rule(config.temp_patterns, node) or _additional_path_rule(config, node, InsightCategory.TEMP)
-        cache_rule = _find_rule(config.cache_patterns, node) or _additional_path_rule(config, node, InsightCategory.CACHE)
+    additional_rules: list[tuple[str, PatternRule]] = []
+    for category, sources in (
+        (InsightCategory.TEMP, config.additional_temp_paths),
+        (InsightCategory.CACHE, config.additional_cache_paths),
+    ):
+        for raw_base in sources:
+            base = norm_sep(str(Path(raw_base).expanduser())).rstrip("/")
+            additional_rules.append(
+                (
+                    base,
+                    PatternRule(
+                        name=f"Additional {category.value} path",
+                        pattern=base,
+                        category=category,
+                        safe_to_delete=category is InsightCategory.TEMP,
+                        recommendation="Review configured path and clean safely.",
+                        severity=Severity.MEDIUM,
+                        apply_to="both",
+                        stop_recursion=False,
+                    ),
+                )
+            )
+
+    def _check_additional(
+        node_path: str, category: InsightCategory
+    ) -> PatternRule | None:
+        normalized = norm_sep(node_path).rstrip("/")
+        for base, rule in additional_rules:
+            if rule.category is not category:
+                continue
+            if normalized == base or normalized.startswith(f"{base}/"):
+                return rule
+        return None
+
+    stack: list[tuple[ScanNode, bool]] = [(root, False)]
+    while stack:
+        node, in_temp_or_cache = stack.pop()
+
+        temp_rule = _find_rule(config.temp_patterns, node) or _check_additional(
+            node.path, InsightCategory.TEMP
+        )
+        cache_rule = _find_rule(config.cache_patterns, node) or _check_additional(
+            node.path, InsightCategory.CACHE
+        )
         build_rule = _find_rule(config.build_artifact_patterns, node)
         custom_rule = _find_rule(config.custom_patterns, node)
 
-        local_in_temp_cache = state.in_temp_or_cache or temp_rule is not None or cache_rule is not None
+        local_in_temp_cache = (
+            in_temp_or_cache or temp_rule is not None or cache_rule is not None
+        )
 
-        if temp_rule is not None and node.size_bytes >= config.thresholds.min_insight_bytes:
-            _upsert(
-                insights,
-                Insight(
-                    path=node.path,
-                    size_bytes=node.size_bytes,
-                    category=temp_rule.category,
-                    severity=temp_rule.severity,
-                    safe_to_delete=temp_rule.safe_to_delete,
-                    summary=temp_rule.name,
-                    recommendation=temp_rule.recommendation,
-                    modified_ts=node.modified_ts,
-                ),
-            )
-
-        if cache_rule is not None and node.size_bytes >= config.thresholds.min_insight_bytes:
-            _upsert(
-                insights,
-                Insight(
-                    path=node.path,
-                    size_bytes=node.size_bytes,
-                    category=cache_rule.category,
-                    severity=cache_rule.severity,
-                    safe_to_delete=cache_rule.safe_to_delete,
-                    summary=cache_rule.name,
-                    recommendation=cache_rule.recommendation,
-                    modified_ts=node.modified_ts,
-                ),
-            )
-
-        if build_rule is not None and node.size_bytes >= config.thresholds.min_insight_bytes:
-            _upsert(
-                insights,
-                Insight(
-                    path=node.path,
-                    size_bytes=node.size_bytes,
-                    category=build_rule.category,
-                    severity=build_rule.severity,
-                    safe_to_delete=build_rule.safe_to_delete,
-                    summary=build_rule.name,
-                    recommendation=build_rule.recommendation,
-                    modified_ts=node.modified_ts,
-                ),
-            )
-
-        if custom_rule is not None and node.size_bytes >= config.thresholds.min_insight_bytes:
-            _upsert(
-                insights,
-                Insight(
-                    path=node.path,
-                    size_bytes=node.size_bytes,
-                    category=InsightCategory.CUSTOM,
-                    severity=custom_rule.severity,
-                    safe_to_delete=custom_rule.safe_to_delete,
-                    summary=custom_rule.name,
-                    recommendation=custom_rule.recommendation,
-                    modified_ts=node.modified_ts,
-                ),
-            )
+        if node.size_bytes >= config.thresholds.min_insight_bytes:
+            for rule in (temp_rule, cache_rule, build_rule, custom_rule):
+                if rule is not None:
+                    _upsert(insights, _insight_from_rule(node, rule))
 
         if not local_in_temp_cache:
-            if not node.is_dir and node.size_bytes >= config.thresholds.large_file_bytes:
+            if (
+                not node.is_dir
+                and node.size_bytes >= config.thresholds.large_file_bytes
+            ):
                 _upsert(
                     insights,
                     Insight(
@@ -179,7 +147,10 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
                     ),
                 )
 
-            if not node.is_dir and now - node.modified_ts >= config.thresholds.old_file_seconds:
+            if (
+                not node.is_dir
+                and now - node.modified_ts >= config.thresholds.old_file_seconds
+            ):
                 _upsert(
                     insights,
                     Insight(
@@ -196,17 +167,21 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
 
         if node.is_dir:
             if build_rule is not None and build_rule.stop_recursion:
-                return
-            for child in node.children:
-                walk(child, _MatchState(in_temp_or_cache=local_in_temp_cache))
-
-    walk(root, _MatchState(in_temp_or_cache=False))
+                continue
+            for child in reversed(node.children):
+                stack.append((child, local_in_temp_cache))
 
     ordered = sorted(insights.values(), key=lambda x: x.size_bytes, reverse=True)
     reclaimable = sum(item.size_bytes for item in ordered)
     safe_reclaimable = sum(item.size_bytes for item in ordered if item.safe_to_delete)
-    return InsightBundle(insights=ordered, reclaimable_bytes=reclaimable, safe_reclaimable_bytes=safe_reclaimable)
+    return InsightBundle(
+        insights=ordered,
+        reclaimable_bytes=reclaimable,
+        safe_reclaimable_bytes=safe_reclaimable,
+    )
 
 
-def filter_insights(bundle: InsightBundle, categories: set[InsightCategory]) -> list[Insight]:
+def filter_insights(
+    bundle: InsightBundle, categories: set[InsightCategory]
+) -> list[Insight]:
     return [item for item in bundle.insights if item.category in categories]

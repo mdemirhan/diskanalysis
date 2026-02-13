@@ -7,16 +7,18 @@ from rich.panel import Panel
 from rich.table import Table
 
 from diskanalysis.config.schema import AppConfig
-from diskanalysis.models.enums import InsightCategory, NodeKind
+from diskanalysis.models.enums import NodeKind
 from diskanalysis.models.insight import Insight, InsightBundle
 from diskanalysis.models.scan import ScanNode, ScanStats
 from diskanalysis.services.formatting import format_bytes
 
 
-def _iter_nodes(node: ScanNode):
-    yield node
-    for child in node.children:
-        yield from _iter_nodes(child)
+def _iter_nodes(root: ScanNode):
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        yield node
+        stack.extend(node.children)
 
 
 def _top_consumers(root: ScanNode, top_n: int) -> list[ScanNode]:
@@ -38,7 +40,13 @@ def _stats_panel(root: ScanNode, stats: ScanStats, bundle: InsightBundle) -> Pan
     return Panel(body, title="Scan Summary", border_style="blue")
 
 
-def render_summary(console: Console, root: ScanNode, stats: ScanStats, bundle: InsightBundle, config: AppConfig) -> None:
+def render_summary(
+    console: Console,
+    root: ScanNode,
+    stats: ScanStats,
+    bundle: InsightBundle,
+    config: AppConfig,
+) -> None:
     console.print(_stats_panel(root, stats, bundle))
 
     top_table = Table(title="Top Space Consumers", header_style="bold cyan")
@@ -47,7 +55,11 @@ def render_summary(console: Console, root: ScanNode, stats: ScanStats, bundle: I
     top_table.add_column("Size", justify="right")
 
     for node in _top_consumers(root, config.top_n):
-        top_table.add_row(node.path, "DIR" if node.kind is NodeKind.DIRECTORY else "FILE", format_bytes(node.size_bytes))
+        top_table.add_row(
+            node.path,
+            "DIR" if node.kind is NodeKind.DIRECTORY else "FILE",
+            format_bytes(node.size_bytes),
+        )
     console.print(top_table)
 
     by_category: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))
@@ -59,18 +71,24 @@ def render_summary(console: Console, root: ScanNode, stats: ScanStats, bundle: I
     cat_table.add_column("Category")
     cat_table.add_column("Count", justify="right")
     cat_table.add_column("Size", justify="right")
-    for category, (count, total) in sorted(by_category.items(), key=lambda x: x[1][1], reverse=True):
+    for category, (count, total) in sorted(
+        by_category.items(), key=lambda x: x[1][1], reverse=True
+    ):
         cat_table.add_row(category, str(count), format_bytes(total))
     console.print(cat_table)
 
-    quick_wins = [item for item in bundle.insights if item.safe_to_delete][: config.top_n]
+    quick_wins = [item for item in bundle.insights if item.safe_to_delete][
+        : config.top_n
+    ]
     wins_table = Table(title="Quick Wins (Safe to Delete)", header_style="bold green")
     wins_table.add_column("Path")
     wins_table.add_column("Size", justify="right")
     wins_table.add_column("Recommendation")
 
     for item in quick_wins:
-        wins_table.add_row(item.path, format_bytes(item.size_bytes), item.recommendation)
+        wins_table.add_row(
+            item.path, format_bytes(item.size_bytes), item.recommendation
+        )
     console.print(wins_table)
 
 
@@ -82,7 +100,12 @@ def render_focused_summary(
     insights: list[Insight],
     top_n: int,
 ) -> None:
-    console.print(Panel(f"Analyzed: [bold]{format_bytes(analyzed_total)}[/bold]\nSafe to Delete: [bold]{format_bytes(safe_total)}[/bold]", title=title))
+    console.print(
+        Panel(
+            f"Analyzed: [bold]{format_bytes(analyzed_total)}[/bold]\nSafe to Delete: [bold]{format_bytes(safe_total)}[/bold]",
+            title=title,
+        )
+    )
 
     table = Table(title="Top Candidates", header_style="bold yellow")
     table.add_column("Path")
@@ -100,11 +123,3 @@ def render_focused_summary(
             item.recommendation,
         )
     console.print(table)
-
-
-def categories_for_mode(mode: str | None) -> set[InsightCategory] | None:
-    if mode == "temp":
-        return {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT}
-    if mode == "cache":
-        return {InsightCategory.CACHE}
-    return None

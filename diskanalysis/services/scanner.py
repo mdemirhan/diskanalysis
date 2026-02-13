@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 import queue
 import stat as statmod
@@ -21,19 +20,15 @@ from diskanalysis.models.scan import (
     ScanResult,
     ScanSnapshot,
     ScanStats,
+    norm_sep,
 )
 from diskanalysis.services.patterns import matches_glob
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class _Task:
-    path: str
-    depth: int
     node: ScanNode
-
-
-def _norm(path: str) -> str:
-    return path.replace("\\", "/")
+    depth: int
 
 
 def _is_glob_pattern(value: str) -> bool:
@@ -41,28 +36,31 @@ def _is_glob_pattern(value: str) -> bool:
 
 
 def _is_excluded(path: str, name: str, options: ScanOptions) -> bool:
-    normalized = _norm(path)
+    normalized = norm_sep(path)
     for pattern in options.exclude_paths:
-        raw = _norm(pattern)
+        raw = norm_sep(pattern)
         if not _is_glob_pattern(raw):
             raw = raw.rstrip("/")
             if normalized == raw or normalized.startswith(f"{raw}/"):
                 return True
-        if matches_glob(pattern, normalized, name):
+        if matches_glob(raw, normalized, name):
             return True
     return False
 
 
-def _finalize_sizes(node: ScanNode) -> int:
-    if not node.is_dir:
-        return node.size_bytes
-
-    total = 0
-    for child in node.children:
-        total += _finalize_sizes(child)
-    node.children.sort(key=lambda x: x.size_bytes, reverse=True)
-    node.size_bytes = total
-    return total
+def _finalize_sizes(root: ScanNode) -> None:
+    stack: list[ScanNode] = []
+    visit: list[ScanNode] = [root]
+    while visit:
+        node = visit.pop()
+        if not node.is_dir:
+            continue
+        stack.append(node)
+        visit.extend(node.children)
+    for node in reversed(stack):
+        total = sum(child.size_bytes for child in node.children)
+        node.children.sort(key=lambda x: x.size_bytes, reverse=True)
+        node.size_bytes = total
 
 
 def scan_path(
@@ -74,15 +72,33 @@ def scan_path(
 ) -> ScanResult:
     root_path = Path(path).expanduser()
     if not root_path.exists():
-        return Err(ScanError(code=ScanErrorCode.NOT_FOUND, path=str(root_path), message="Path does not exist"))
+        return Err(
+            ScanError(
+                code=ScanErrorCode.NOT_FOUND,
+                path=str(root_path),
+                message="Path does not exist",
+            )
+        )
     if not root_path.is_dir():
-        return Err(ScanError(code=ScanErrorCode.NOT_DIRECTORY, path=str(root_path), message="Path is not a directory"))
+        return Err(
+            ScanError(
+                code=ScanErrorCode.NOT_DIRECTORY,
+                path=str(root_path),
+                message="Path is not a directory",
+            )
+        )
 
     resolved_root = str(root_path.resolve())
     try:
         root_stat = root_path.stat(follow_symlinks=options.follow_symlinks)
     except OSError as exc:
-        return Err(ScanError(code=ScanErrorCode.ROOT_STAT_FAILED, path=resolved_root, message=f"Cannot stat root: {exc}"))
+        return Err(
+            ScanError(
+                code=ScanErrorCode.ROOT_STAT_FAILED,
+                path=resolved_root,
+                message=f"Cannot stat root: {exc}",
+            )
+        )
 
     root_node = ScanNode(
         path=resolved_root,
@@ -94,7 +110,7 @@ def scan_path(
     )
 
     q: queue.Queue[_Task | None] = queue.Queue()
-    q.put(_Task(path=resolved_root, depth=0, node=root_node))
+    q.put(_Task(root_node, 0))
 
     stats = ScanStats(files=0, directories=1, bytes_total=0, access_errors=0)
     stats_lock = threading.Lock()
@@ -104,7 +120,8 @@ def scan_path(
         if progress_callback is None:
             return
         with stats_lock:
-            progress_callback(current_path, stats.files, stats.directories)
+            f, d = stats.files, stats.directories
+        progress_callback(current_path, f, d)
 
     def run_worker() -> None:
         while True:
@@ -123,7 +140,7 @@ def scan_path(
                 continue
 
             try:
-                with os.scandir(task.path) as entries:
+                with os.scandir(task.node.path) as entries:
                     for entry in entries:
                         if cancelled.is_set():
                             break
@@ -131,13 +148,13 @@ def scan_path(
                             cancelled.set()
                             break
 
-                        entry_path = entry.path
-                        entry_name = entry.name
-                        if _is_excluded(entry_path, entry_name, options):
+                        if _is_excluded(entry.path, entry.name, options):
                             continue
 
                         try:
-                            stat_result = entry.stat(follow_symlinks=options.follow_symlinks)
+                            stat_result = entry.stat(
+                                follow_symlinks=options.follow_symlinks
+                            )
                         except OSError:
                             with stats_lock:
                                 stats.access_errors += 1
@@ -145,8 +162,8 @@ def scan_path(
 
                         is_dir = statmod.S_ISDIR(stat_result.st_mode)
                         node = ScanNode(
-                            path=entry_path,
-                            name=entry_name,
+                            path=entry.path,
+                            name=entry.name,
                             kind=NodeKind.DIRECTORY if is_dir else NodeKind.FILE,
                             size_bytes=0 if is_dir else stat_result.st_size,
                             modified_ts=stat_result.st_mtime,
@@ -157,9 +174,12 @@ def scan_path(
                         if is_dir:
                             with stats_lock:
                                 stats.directories += 1
-                            within_depth = options.max_depth is None or task.depth < options.max_depth
+                            within_depth = (
+                                options.max_depth is None
+                                or task.depth < options.max_depth
+                            )
                             if within_depth:
-                                q.put(_Task(path=node.path, depth=task.depth + 1, node=node))
+                                q.put(_Task(node, task.depth + 1))
                         else:
                             with stats_lock:
                                 stats.files += 1
@@ -172,7 +192,9 @@ def scan_path(
                 q.task_done()
 
     num_workers = max(1, workers)
-    threads = [threading.Thread(target=run_worker, daemon=True) for _ in range(num_workers)]
+    threads = [
+        threading.Thread(target=run_worker, daemon=True) for _ in range(num_workers)
+    ]
     for thread in threads:
         thread.start()
     q.join()
@@ -183,25 +205,14 @@ def scan_path(
         thread.join(timeout=0.3)
 
     if cancelled.is_set():
-        return Err(ScanError(code=ScanErrorCode.CANCELLED, path=resolved_root, message="Scan cancelled"))
+        return Err(
+            ScanError(
+                code=ScanErrorCode.CANCELLED,
+                path=resolved_root,
+                message="Scan cancelled",
+            )
+        )
 
     _finalize_sizes(root_node)
     stats.bytes_total = root_node.size_bytes
     return Ok(ScanSnapshot(root=root_node, stats=stats))
-
-
-async def scan_path_async(
-    path: str | Path,
-    options: ScanOptions,
-    progress_callback: ProgressCallback | None = None,
-    cancel_check: CancelCheck | None = None,
-    workers: int = 4,
-) -> ScanResult:
-    return await asyncio.to_thread(
-        scan_path,
-        path,
-        options,
-        progress_callback,
-        cancel_check,
-        workers,
-    )

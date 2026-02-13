@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from diskanalysis.models.enums import InsightCategory, Severity
 
@@ -12,22 +12,16 @@ class Thresholds:
     large_dir_mb: int = 2048
     old_file_days: int = 365
     min_insight_mb: int = 50
+    large_file_bytes: int = field(init=False)
+    large_dir_bytes: int = field(init=False)
+    old_file_seconds: int = field(init=False)
+    min_insight_bytes: int = field(init=False)
 
-    @property
-    def large_file_bytes(self) -> int:
-        return self.large_file_mb * 1024 * 1024
-
-    @property
-    def large_dir_bytes(self) -> int:
-        return self.large_dir_mb * 1024 * 1024
-
-    @property
-    def old_file_seconds(self) -> int:
-        return self.old_file_days * 24 * 60 * 60
-
-    @property
-    def min_insight_bytes(self) -> int:
-        return self.min_insight_mb * 1024 * 1024
+    def __post_init__(self) -> None:
+        self.large_file_bytes = self.large_file_mb * 1024 * 1024
+        self.large_dir_bytes = self.large_dir_mb * 1024 * 1024
+        self.old_file_seconds = self.old_file_days * 24 * 60 * 60
+        self.min_insight_bytes = self.min_insight_mb * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -38,7 +32,7 @@ class PatternRule:
     safe_to_delete: bool
     recommendation: str
     severity: Severity = Severity.MEDIUM
-    apply_to: str = "both"
+    apply_to: Literal["file", "dir", "both"] = "both"
     stop_recursion: bool = False
 
 
@@ -74,10 +68,11 @@ class AppConfig:
             "topN": self.top_n,
             "tempPatterns": [_rule_to_dict(rule) for rule in self.temp_patterns],
             "cachePatterns": [_rule_to_dict(rule) for rule in self.cache_patterns],
-            "buildArtifactPatterns": [_rule_to_dict(rule) for rule in self.build_artifact_patterns],
+            "buildArtifactPatterns": [
+                _rule_to_dict(rule) for rule in self.build_artifact_patterns
+            ],
             "customPatterns": [_rule_to_dict(rule) for rule in self.custom_patterns],
         }
-
 
 
 def _rule_to_dict(rule: PatternRule) -> dict[str, Any]:
@@ -93,6 +88,16 @@ def _rule_to_dict(rule: PatternRule) -> dict[str, Any]:
     }
 
 
+_VALID_APPLY_TO: set[str] = {"file", "dir", "both"}
+
+
+def _parse_apply_to(value: Any) -> Literal["file", "dir", "both"]:
+    raw = str(value)
+    if raw in _VALID_APPLY_TO:
+        return raw  # type: ignore[return-value]
+    return "both"
+
+
 def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:
     return PatternRule(
         name=str(payload["name"]),
@@ -101,7 +106,7 @@ def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:
         safe_to_delete=bool(payload.get("safeToDelete", False)),
         recommendation=str(payload.get("recommendation", "Review before deleting.")),
         severity=Severity(str(payload.get("severity", Severity.MEDIUM.value))),
-        apply_to=str(payload.get("applyTo", "both")),
+        apply_to=_parse_apply_to(payload.get("applyTo", "both")),
         stop_recursion=bool(payload.get("stopRecursion", False)),
     )
 
@@ -109,28 +114,51 @@ def _rule_from_dict(payload: dict[str, Any]) -> PatternRule:
 def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
     thresholds = data.get("thresholds", {})
     threshold_obj = Thresholds(
-        large_file_mb=int(thresholds.get("largeFileMb", defaults.thresholds.large_file_mb)),
-        large_dir_mb=int(thresholds.get("largeDirMb", defaults.thresholds.large_dir_mb)),
-        old_file_days=int(thresholds.get("oldFileDays", defaults.thresholds.old_file_days)),
-        min_insight_mb=int(thresholds.get("minInsightMb", defaults.thresholds.min_insight_mb)),
+        large_file_mb=int(
+            thresholds.get("largeFileMb", defaults.thresholds.large_file_mb)
+        ),
+        large_dir_mb=int(
+            thresholds.get("largeDirMb", defaults.thresholds.large_dir_mb)
+        ),
+        old_file_days=int(
+            thresholds.get("oldFileDays", defaults.thresholds.old_file_days)
+        ),
+        min_insight_mb=int(
+            thresholds.get("minInsightMb", defaults.thresholds.min_insight_mb)
+        ),
     )
 
-    cfg = AppConfig(
+    max_depth_raw = data.get("maxDepth", defaults.max_depth)
+
+    return AppConfig(
         thresholds=threshold_obj,
-        exclude_paths=[str(x) for x in data.get("excludePaths", defaults.exclude_paths)],
-        additional_temp_paths=[str(x) for x in data.get("additionalTempPaths", defaults.additional_temp_paths)],
-        additional_cache_paths=[str(x) for x in data.get("additionalCachePaths", defaults.additional_cache_paths)],
+        exclude_paths=[
+            str(x) for x in data.get("excludePaths", defaults.exclude_paths)
+        ],
+        additional_temp_paths=[
+            str(x)
+            for x in data.get("additionalTempPaths", defaults.additional_temp_paths)
+        ],
+        additional_cache_paths=[
+            str(x)
+            for x in data.get("additionalCachePaths", defaults.additional_cache_paths)
+        ],
         follow_symlinks=bool(data.get("followSymlinks", defaults.follow_symlinks)),
-        max_depth=data.get("maxDepth", defaults.max_depth),
+        max_depth=int(max_depth_raw) if max_depth_raw is not None else None,
         scan_workers=max(1, int(data.get("scanWorkers", defaults.scan_workers))),
         top_n=max(1, int(data.get("topN", defaults.top_n))),
-        temp_patterns=[_rule_from_dict(x) for x in data.get("tempPatterns", [_rule_to_dict(r) for r in defaults.temp_patterns])],
-        cache_patterns=[_rule_from_dict(x) for x in data.get("cachePatterns", [_rule_to_dict(r) for r in defaults.cache_patterns])],
+        temp_patterns=[_rule_from_dict(x) for x in data["tempPatterns"]]
+        if "tempPatterns" in data
+        else list(defaults.temp_patterns),
+        cache_patterns=[_rule_from_dict(x) for x in data["cachePatterns"]]
+        if "cachePatterns" in data
+        else list(defaults.cache_patterns),
         build_artifact_patterns=[
-            _rule_from_dict(x) for x in data.get("buildArtifactPatterns", [_rule_to_dict(r) for r in defaults.build_artifact_patterns])
-        ],
-        custom_patterns=[_rule_from_dict(x) for x in data.get("customPatterns", [_rule_to_dict(r) for r in defaults.custom_patterns])],
+            _rule_from_dict(x) for x in data["buildArtifactPatterns"]
+        ]
+        if "buildArtifactPatterns" in data
+        else list(defaults.build_artifact_patterns),
+        custom_patterns=[_rule_from_dict(x) for x in data["customPatterns"]]
+        if "customPatterns" in data
+        else list(defaults.custom_patterns),
     )
-    if cfg.max_depth is not None:
-        cfg.max_depth = int(cfg.max_depth)
-    return cfg

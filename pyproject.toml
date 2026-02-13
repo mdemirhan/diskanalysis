@@ -60,4 +60,5 @@ reportMissingParameterType = "none"
 dev = [
     "basedpyright>=1.38.0",
     "pytest>=8.3.0",
+    "ruff>=0.15.1",
 ]

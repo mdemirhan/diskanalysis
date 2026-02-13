@@ -1,23 +1,24 @@
 from __future__ import annotations
 
 from fnmatch import fnmatch
+from functools import lru_cache
 
 from diskanalysis.config.schema import PatternRule
 
 
-def _expand_braces(pattern: str) -> list[str]:
+@lru_cache(maxsize=256)
+def _expand_braces(pattern: str) -> tuple[str, ...]:
     start = pattern.find("{")
     end = pattern.find("}", start + 1)
     if start == -1 or end == -1:
-        return [pattern]
+        return (pattern,)
     choices = pattern[start + 1 : end].split(",")
     prefix = pattern[:start]
     suffix = pattern[end + 1 :]
     expanded: list[str] = []
     for choice in choices:
-        for child in _expand_braces(f"{prefix}{choice}{suffix}"):
-            expanded.append(child)
-    return expanded
+        expanded.extend(_expand_braces(f"{prefix}{choice}{suffix}"))
+    return tuple(expanded)
 
 
 def _match_pattern(pattern: str, normalized_path: str, basename: str) -> bool:
@@ -31,7 +32,9 @@ def _match_pattern(pattern: str, normalized_path: str, basename: str) -> bool:
     return fnmatch(basename, pattern)
 
 
-def matches_rule(rule: PatternRule, normalized_path: str, basename: str, is_dir: bool) -> bool:
+def matches_rule(
+    rule: PatternRule, normalized_path: str, basename: str, is_dir: bool
+) -> bool:
     if rule.apply_to == "file" and is_dir:
         return False
     if rule.apply_to == "dir" and not is_dir:

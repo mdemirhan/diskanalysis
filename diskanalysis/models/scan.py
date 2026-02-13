@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
 from typing import Callable
 
 from result import Result
@@ -67,5 +66,5 @@ class ScanError:
 ScanResult = Result[ScanSnapshot, ScanError]
 
 
-def normalize_path(path: str | Path) -> str:
-    return str(Path(path).expanduser().resolve())
+def norm_sep(path: str) -> str:
+    return path.replace("\\", "/")

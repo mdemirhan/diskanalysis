@@ -12,7 +12,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
-from result import Err, Ok
+from result import Err
 
 from diskanalysis.config.defaults import default_config
 from diskanalysis.config.loader import load_config, sample_config_json
@@ -53,7 +53,9 @@ def _render_scan_panel(progress: _ScanProgress, workers: int, phase: str) -> Pan
             + f"    [#de935f]Elapsed:[/] {elapsed:.1f}s"
         ),
     )
-    return Panel(body, title="[bold #81a2be]DiskAnalysis Startup[/]", border_style="#373b41")
+    return Panel(
+        body, title="[bold #81a2be]DiskAnalysis Startup[/]", border_style="#373b41"
+    )
 
 
 def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanResult:
@@ -77,13 +79,20 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
 
     def scan_worker() -> None:
         nonlocal result
-        result = scan_path(path, options, progress_callback=on_progress, workers=workers)
+        result = scan_path(
+            path, options, progress_callback=on_progress, workers=workers
+        )
         done.set()
 
     thread = threading.Thread(target=scan_worker, daemon=True)
     thread.start()
 
-    with Live(_render_scan_panel(progress, workers, "Scanning directory tree..."), console=console, refresh_per_second=12, transient=True) as live:
+    with Live(
+        _render_scan_panel(progress, workers, "Scanning directory tree..."),
+        console=console,
+        refresh_per_second=12,
+        transient=True,
+    ) as live:
         while not done.is_set():
             with lock:
                 snapshot = _ScanProgress(
@@ -93,7 +102,9 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
                     updates=progress.updates,
                     start_time=progress.start_time,
                 )
-            live.update(_render_scan_panel(snapshot, workers, "Scanning directory tree..."))
+            live.update(
+                _render_scan_panel(snapshot, workers, "Scanning directory tree...")
+            )
             time.sleep(0.08)
 
         with lock:
@@ -108,16 +119,30 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
 
     thread.join()
     if result is None:
-        return Err(ScanError(code=ScanErrorCode.INTERNAL, path=str(path), message="Scan did not complete"))
+        return Err(
+            ScanError(
+                code=ScanErrorCode.INTERNAL,
+                path=str(path),
+                message="Scan did not complete",
+            )
+        )
     return result
 
 
 def run(
     path: Annotated[str, typer.Argument(help="Path to analyze.")] = ".",
-    temp: Annotated[bool, typer.Option("--temp", "-t", help="Focus on temp/build artifacts.")] = False,
-    cache: Annotated[bool, typer.Option("--cache", "-c", help="Focus on caches.")] = False,
-    summary: Annotated[bool, typer.Option("--summary", "-s", help="Render non-interactive summary.")] = False,
-    sample_config: Annotated[bool, typer.Option("--sample-config", help="Print sample config JSON.")] = False,
+    temp: Annotated[
+        bool, typer.Option("--temp", "-t", help="Focus on temp/build artifacts.")
+    ] = False,
+    cache: Annotated[
+        bool, typer.Option("--cache", "-c", help="Focus on caches.")
+    ] = False,
+    summary: Annotated[
+        bool, typer.Option("--summary", "-s", help="Render non-interactive summary.")
+    ] = False,
+    sample_config: Annotated[
+        bool, typer.Option("--sample-config", help="Print sample config JSON.")
+    ] = False,
 ) -> None:
     if sample_config:
         console.print(sample_config_json())
@@ -128,13 +153,11 @@ def run(
         raise typer.Exit(2)
 
     config_result = load_config()
-    match config_result:
-        case Ok():
-            config = config_result.unwrap()
-        case Err():
-            warning = config_result.unwrap_err()
-            console.print(f"[yellow]{warning} Using defaults.[/]")
-            config = default_config()
+    if isinstance(config_result, Err):
+        console.print(f"[yellow]{config_result.unwrap_err()} Using defaults.[/]")
+        config = default_config()
+    else:
+        config = config_result.unwrap()
 
     scan_options = ScanOptions(
         max_depth=config.max_depth,
@@ -142,27 +165,43 @@ def run(
         exclude_paths=tuple(config.exclude_paths),
     )
 
-    scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers)
-    match scan_result:
-        case Ok():
-            snapshot = scan_result.unwrap()
-        case Err():
-            error = scan_result.unwrap_err()
-            console.print(f"[red]Scan failed for {error.path}: {error.message}[/]")
-            raise typer.Exit(1)
+    scan_result = _scan_with_progress(
+        Path(path), scan_options, workers=config.scan_workers
+    )
+    if isinstance(scan_result, Err):
+        error = scan_result.unwrap_err()
+        console.print(f"[red]Scan failed for {error.path}: {error.message}[/]")
+        raise typer.Exit(1)
+    snapshot = scan_result.unwrap()
 
     with console.status("[bold #8abeb7]Generating insights...[/]"):
         bundle = generate_insights(snapshot.root, config)
 
     if summary:
         if temp:
-            focused = filter_insights(bundle, {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT})
+            focused = filter_insights(
+                bundle, {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT}
+            )
             safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
-            render_focused_summary(console, "Temp / Build Summary", snapshot.root.size_bytes, safe_total, focused, config.top_n)
+            render_focused_summary(
+                console,
+                "Temp / Build Summary",
+                snapshot.root.size_bytes,
+                safe_total,
+                focused,
+                config.top_n,
+            )
         elif cache:
             focused = filter_insights(bundle, {InsightCategory.CACHE})
             safe_total = sum(item.size_bytes for item in focused if item.safe_to_delete)
-            render_focused_summary(console, "Cache Summary", snapshot.root.size_bytes, safe_total, focused, config.top_n)
+            render_focused_summary(
+                console,
+                "Cache Summary",
+                snapshot.root.size_bytes,
+                safe_total,
+                focused,
+                config.top_n,
+            )
         else:
             render_summary(console, snapshot.root, snapshot.stats, bundle, config)
         raise typer.Exit(0)
@@ -173,7 +212,13 @@ def run(
     elif cache:
         initial_view = "cache"
 
-    tui = DiskAnalyzerApp(root=snapshot.root, stats=snapshot.stats, bundle=bundle, config=config, initial_view=initial_view)
+    tui = DiskAnalyzerApp(
+        root=snapshot.root,
+        stats=snapshot.stats,
+        bundle=bundle,
+        config=config,
+        initial_view=initial_view,
+    )
     tui.run()
 
 
