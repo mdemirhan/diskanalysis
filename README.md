@@ -78,12 +78,9 @@ Browse:
 - `G`/`End`: bottom
 - `PgUp`/`PgDn`, `Ctrl+U`/`Ctrl+D`: page
 
-Temp / large views:
+Temp:
 
-- `j/k`, arrows
-- `gg/G`, `Home/End`
-- `PgUp/PgDn`, `Ctrl+U/Ctrl+D`
-- `[` / `]`: prev/next Temp page
+- `[` / `]`: prev/next page
 
 Symlink behavior:
 
