@@ -9,9 +9,9 @@ from typing import Callable, override
 from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
-from textual.containers import Container
+from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, Input, Static
 
 from diskanalysis.config.schema import AppConfig
 from diskanalysis.models.enums import InsightCategory, NodeKind
@@ -106,6 +106,10 @@ class HelpOverlay(ModalScreen[None]):
                 "[b #81a2be]Pagination[/]",
                 "  [ / ]: Previous/Next page",
                 "",
+                "[b #81a2be]Search / Filter[/]",
+                "  /: Search / filter rows",
+                "  Escape: Clear filter",
+                "",
                 "[b #81a2be]Other[/]",
                 "  y: Yank full path to clipboard",
                 "  Y: Yank display text to clipboard",
@@ -123,6 +127,59 @@ class HelpOverlay(ModalScreen[None]):
 
     def key_question_mark(self) -> None:
         self.dismiss()
+
+
+class SearchOverlay(ModalScreen[str]):
+    CSS = """
+    SearchOverlay {
+        align: center middle;
+        background: rgba(0,0,0,0.45);
+    }
+    #search-box {
+        width: 60%;
+        height: auto;
+        max-height: 9;
+        background: #282a2e;
+        border: solid #81a2be;
+        padding: 1 2;
+        color: #c5c8c6;
+    }
+    #search-label {
+        width: 100%;
+        color: #81a2be;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    #search-input {
+        width: 100%;
+    }
+    """
+
+    def __init__(self, current_filter: str = "") -> None:
+        super().__init__()
+        self._current_filter = current_filter
+
+    @override
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("Filter rows (Enter to apply, Escape to cancel)", id="search-label"),
+            Input(
+                placeholder="Type to filter…",
+                value=self._current_filter,
+                id="search-input",
+            ),
+            id="search-box",
+        )
+
+    def on_mount(self) -> None:
+        self.query_one("#search-input", Input).focus()
+
+    @on(Input.Submitted)
+    def _on_submit(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
+    def key_escape(self) -> None:
+        self.dismiss(self._current_filter)
 
 
 class DiskAnalyzerApp(App[None]):
@@ -165,6 +222,7 @@ class DiskAnalyzerApp(App[None]):
         }
         self._view_cursor: dict[str, int] = {}
         self._view_scroll: dict[str, float] = {}
+        self._view_filter: dict[str, str] = {}
 
     def _index_tree(self, root: ScanNode) -> None:
         stack: list[tuple[ScanNode, str | None]] = [(root, None)]
@@ -288,7 +346,12 @@ class DiskAnalyzerApp(App[None]):
         cursor = min(total_rows, self.selected_index + 1)
 
         state = self._paged_states.get(self.current_view)
-        paged_total = state.total_rows if state is not None else 0
+        if state is not None and state.all_rows is not None:
+            paged_total = len(self._filter_rows(state.all_rows))
+        else:
+            paged_total = state.total_rows if state is not None else 0
+
+        active_filter = self._view_filter.get(self.current_view, "")
 
         left = f"Row {cursor}/{total_rows}"
         if paged_total > self._page_size:
@@ -299,12 +362,16 @@ class DiskAnalyzerApp(App[None]):
         trimmed_text = self._trimmed_indicator(self.current_view)
         if trimmed_text:
             left += f" | {trimmed_text}"
+        if active_filter:
+            left += f" | Filter: '{active_filter}'"
 
-        hints = "q quit | ? help | Tab views | y yank path | Y yank name"
+        hints = "q quit | ? help | Tab views | / search | y yank path | Y yank name"
         if self.current_view == "browse":
             hints += " | h/l collapse/expand | Enter/Backspace drill-in/out"
         if paged_total > self._page_size:
             hints += " | \\[/] prev/next page"
+        if active_filter:
+            hints += " | Esc clear filter"
 
         # Account for horizontal padding: #app-grid (0 1) + #status-row (0 1)
         width = self.size.width - 4
@@ -328,7 +395,7 @@ class DiskAnalyzerApp(App[None]):
 
         cached = self._rows_cache.get(self.current_view)
         if cached is not None:
-            return cached
+            return self._filter_rows(cached)
 
         if self.current_view == "overview":
             rows = self._overview_rows()
@@ -338,19 +405,19 @@ class DiskAnalyzerApp(App[None]):
             rows = []
 
         self._rows_cache[self.current_view] = rows
-        return rows
+        return self._filter_rows(rows)
 
     def _paged_view_rows(self, view: str) -> list[DisplayRow]:
         state = self._paged_states[view]
         if state.all_rows is None:
             state.all_rows, state.total_items = self._build_all_paged_rows(view)
-        total_pages = max(
-            1, (state.total_rows + self._page_size - 1) // self._page_size
-        )
+        filtered = self._filter_rows(state.all_rows)
+        filtered_count = len(filtered)
+        total_pages = max(1, (filtered_count + self._page_size - 1) // self._page_size)
         state.page_index = max(0, min(state.page_index, total_pages - 1))
         start = state.page_index * self._page_size
         end = start + self._page_size
-        return state.all_rows[start:end]
+        return filtered[start:end]
 
     def _build_all_paged_rows(self, view: str) -> tuple[list[DisplayRow], int]:
         if view == "temp":
@@ -399,6 +466,13 @@ class DiskAnalyzerApp(App[None]):
         if state.total_rows < state.total_items:
             return f"Showing {state.total_rows:,} of {state.total_items:,} results"
         return f"Showing {state.total_rows:,} results"
+
+    def _filter_rows(self, rows: list[DisplayRow]) -> list[DisplayRow]:
+        pattern = self._view_filter.get(self.current_view, "")
+        if not pattern:
+            return rows
+        p = pattern.lower()
+        return [r for r in rows if p in r.name.lower() or p in r.path.lower()]
 
     def _category_size(self, *categories: InsightCategory) -> int:
         return sum(self.bundle.category_sizes.get(cat, 0) for cat in categories)
@@ -739,6 +813,10 @@ class DiskAnalyzerApp(App[None]):
             }
             self._set_view(mapping[key])
             return True
+        if key == "slash":
+            current = self._view_filter.get(self.current_view, "")
+            self.push_screen(SearchOverlay(current), self._on_search_result)
+            return True
         return False
 
     def _handle_navigation_key(self, key: str, char: str) -> bool:
@@ -791,10 +869,29 @@ class DiskAnalyzerApp(App[None]):
             return True
         return False
 
+    def _on_search_result(self, value: str | None) -> None:
+        if value:
+            self._view_filter[self.current_view] = value
+        else:
+            self._view_filter.pop(self.current_view, None)
+        self.selected_index = 0
+        if self.current_view in _PAGED_VIEWS:
+            self._paged_states[self.current_view].page_index = 0
+        self._refresh_all()
+
     @override
     def on_key(self, event) -> None:  # type: ignore[override]
         key = event.key
         char = event.character or ""
+
+        if key == "escape":
+            if self._view_filter.get(self.current_view):
+                self._view_filter.pop(self.current_view, None)
+                self.selected_index = 0
+                if self.current_view in _PAGED_VIEWS:
+                    self._paged_states[self.current_view].page_index = 0
+                self._refresh_all()
+            return
 
         if self._handle_global_key(key):
             return
