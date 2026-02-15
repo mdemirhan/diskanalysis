@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from result import Err, Ok
 
-from diskanalysis.config.loader import load_config
+from dux.config.loader import load_config
 from tests.fs_mock import MemoryFileSystem
 
 

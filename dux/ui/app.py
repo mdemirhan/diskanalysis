@@ -13,12 +13,12 @@ from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Static
 
-from diskanalysis.config.schema import AppConfig
-from diskanalysis.models.enums import InsightCategory, NodeKind
-from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode, ScanStats
-from diskanalysis.services.formatting import format_bytes, format_ts, relative_bar
-from diskanalysis.services.tree import top_nodes
+from dux.config.schema import AppConfig
+from dux.models.enums import InsightCategory, NodeKind
+from dux.models.insight import Insight, InsightBundle
+from dux.models.scan import ScanNode, ScanStats
+from dux.services.formatting import format_bytes, format_ts, relative_bar
+from dux.services.tree import top_nodes
 
 
 TABS: tuple[str, ...] = ("overview", "browse", "large_dir", "large_file", "temp")
@@ -182,7 +182,7 @@ class SearchOverlay(ModalScreen[str]):
         self.dismiss(self._current_filter)
 
 
-class DiskAnalyzerApp(App[None]):
+class DuxApp(App[None]):
     CSS_PATH = "app.tcss"
 
     def __init__(

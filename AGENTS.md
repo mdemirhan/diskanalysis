@@ -16,7 +16,7 @@ Instructions for AI agents working on this codebase.
 ## Architecture
 
 ```
-diskanalysis/
+dux/
 ├── cli/app.py              # Entry point, CLI flags, progress display
 ├── ui/
 │   ├── app.py              # TUI application (Textual), all views and keybindings

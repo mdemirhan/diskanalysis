@@ -4,12 +4,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from diskanalysis.config.schema import AppConfig
-from diskanalysis.models.enums import NodeKind
-from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode, ScanStats
-from diskanalysis.services.formatting import format_bytes
-from diskanalysis.services.tree import top_nodes
+from dux.config.schema import AppConfig
+from dux.models.enums import NodeKind
+from dux.models.insight import Insight, InsightBundle
+from dux.models.scan import ScanNode, ScanStats
+from dux.services.formatting import format_bytes
+from dux.services.tree import top_nodes
 
 
 def _stats_panel(root: ScanNode, stats: ScanStats) -> Panel:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
-from diskanalysis.services.fs import DirEntry, StatResult
+from dux.services.fs import DirEntry, StatResult
 
 
 @dataclass

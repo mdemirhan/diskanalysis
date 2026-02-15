@@ -7,9 +7,9 @@ from pathlib import Path
 
 from result import Err, Ok
 
-from diskanalysis.services.fs import DEFAULT_FS, FileSystem
-from diskanalysis.models.enums import NodeKind
-from diskanalysis.models.scan import (
+from dux.services.fs import DEFAULT_FS, FileSystem
+from dux.models.enums import NodeKind
+from dux.models.scan import (
     CancelCheck,
     ProgressCallback,
     ScanError,

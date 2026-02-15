@@ -4,11 +4,11 @@ import json
 
 from result import Err, Ok, Result
 
-from diskanalysis.config.defaults import default_config
-from diskanalysis.config.schema import AppConfig, from_dict
-from diskanalysis.services.fs import DEFAULT_FS, FileSystem
+from dux.config.defaults import default_config
+from dux.config.schema import AppConfig, from_dict
+from dux.services.fs import DEFAULT_FS, FileSystem
 
-CONFIG_PATH = "~/.config/diskanalysis/config.json"
+CONFIG_PATH = "~/.config/dux/config.json"
 
 
 def load_config(

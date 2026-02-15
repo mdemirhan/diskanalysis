@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from result import Err, Ok
 
-from diskanalysis.models.scan import ScanErrorCode, ScanOptions
-from diskanalysis.services.scanner import scan_path
+from dux.models.scan import ScanErrorCode, ScanOptions
+from dux.services.scanner import scan_path
 from tests.fs_mock import MemoryFileSystem
 
 
@@ -74,7 +74,7 @@ def test_max_depth_respected() -> None:
 def test_access_error_counted() -> None:
     fs = MemoryFileSystem().add_dir("/root").add_file("/root/ok.bin", size=10)
 
-    from diskanalysis.services.fs import DirEntry
+    from dux.services.fs import DirEntry
 
     original_scandir = fs.scandir
 

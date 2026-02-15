@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from typing import Literal
 
-from diskanalysis.config.schema import PatternRule
+from dux.config.schema import PatternRule
 
 # Matcher kinds — integers for fast dispatch in the hot loop.
 _CONTAINS = 0  # "/segment/" in path  (for **/segment/**)

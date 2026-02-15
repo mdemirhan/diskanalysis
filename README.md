@@ -1,6 +1,6 @@
-# DiskAnalysis
+# dux
 
-A fast, interactive terminal disk analyzer for macOS and Linux. Scans directories in parallel, categorizes files (temp, cache, build artifacts), and presents results in a rich TUI with vim-style navigation.
+A fast, interactive terminal disk usage analyzer for macOS and Linux. Scans directories in parallel, categorizes files (temp, cache, build artifacts), and presents results in a rich TUI with vim-style navigation.
 
 > **100% AI-written.** The vast majority of this codebase was written by Claude (Anthropic), with contributions from Codex (OpenAI). Human involvement was limited to directing, reviewing, and benchmarking.
 
@@ -19,24 +19,24 @@ Requires Python 3.13+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 # Clone and install
-git clone https://github.com/mdemirhan/diskanalysis.git
-cd diskanalysis
+git clone https://github.com/mdemirhan/dux.git
+cd dux
 uv sync
 
 # Analyze current directory (interactive TUI)
-uv run diskanalysis
+uv run dux
 
 # Analyze a specific path
-uv run diskanalysis ~/src
+uv run dux ~/src
 
 # Non-interactive summary
-uv run diskanalysis --summary ~/src
+uv run dux --summary ~/src
 
 # Focus on caches
-uv run diskanalysis --cache ~/src
+uv run dux --cache ~/src
 
 # Focus on temp/build artifacts
-uv run diskanalysis --temp ~/src
+uv run dux --temp ~/src
 ```
 
 ## TUI Views
@@ -84,7 +84,7 @@ Switch views with `Tab`/`Shift+Tab` or press the shortcut key directly.
 ## CLI Options
 
 ```
-uv run diskanalysis [PATH] [OPTIONS]
+uv run dux [PATH] [OPTIONS]
 ```
 
 | Option | Description |
@@ -102,12 +102,12 @@ uv run diskanalysis [PATH] [OPTIONS]
 
 ## Configuration
 
-Config file: `~/.config/diskanalysis/config.json`
+Config file: `~/.config/dux/config.json`
 
 Generate a sample config with all defaults:
 
 ```bash
-uv run diskanalysis --sample-config > ~/.config/diskanalysis/config.json
+uv run dux --sample-config > ~/.config/dux/config.json
 ```
 
 Key settings:

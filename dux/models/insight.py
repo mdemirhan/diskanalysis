@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from diskanalysis.models.enums import InsightCategory
+from dux.models.enums import InsightCategory
 
 
 @dataclass(slots=True)

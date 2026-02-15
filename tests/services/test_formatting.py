@@ -1,4 +1,4 @@
-from diskanalysis.services.formatting import format_bytes
+from dux.services.formatting import format_bytes
 
 
 def test_format_bytes_outputs() -> None:

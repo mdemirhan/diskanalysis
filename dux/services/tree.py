@@ -3,8 +3,8 @@ from __future__ import annotations
 import heapq
 from collections.abc import Iterator
 
-from diskanalysis.models.enums import NodeKind
-from diskanalysis.models.scan import ScanNode
+from dux.models.enums import NodeKind
+from dux.models.scan import ScanNode
 
 
 def iter_nodes(root: ScanNode) -> Iterator[ScanNode]:

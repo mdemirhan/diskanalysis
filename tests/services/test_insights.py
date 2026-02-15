@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import time
 
-from diskanalysis.config.defaults import default_config
-from diskanalysis.models.enums import InsightCategory, NodeKind
-from diskanalysis.models.scan import ScanNode
-from diskanalysis.services.insights import generate_insights
+from dux.config.defaults import default_config
+from dux.models.enums import InsightCategory, NodeKind
+from dux.models.scan import ScanNode
+from dux.services.insights import generate_insights
 
 
 def _tree_with(*children: ScanNode) -> ScanNode:

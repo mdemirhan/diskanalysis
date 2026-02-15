@@ -1,7 +1,7 @@
 [project]
-name = "diskanalysis"
+name = "dux"
 version = "0.1.0"
-description = "Production-grade terminal disk analyzer"
+description = "Fast, interactive terminal disk usage analyzer"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -18,7 +18,7 @@ dev = [
 ]
 
 [project.scripts]
-diskanalysis = "diskanalysis.cli.app:cli"
+dux = "dux.cli.app:cli"
 
 [build-system]
 requires = ["hatchling>=1.27.0"]

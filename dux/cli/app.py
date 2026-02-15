@@ -15,15 +15,15 @@ from rich.spinner import Spinner
 from rich.text import Text
 from result import Err
 
-from diskanalysis.config.defaults import default_config
-from diskanalysis.config.loader import load_config, sample_config_json
-from diskanalysis.models.enums import InsightCategory
-from diskanalysis.models.insight import Insight
-from diskanalysis.models.scan import ScanError, ScanErrorCode, ScanOptions, ScanResult
-from diskanalysis.services.insights import filter_insights, generate_insights
-from diskanalysis.services.scanner import scan_path
-from diskanalysis.services.summary import render_focused_summary, render_summary
-from diskanalysis.ui.app import DiskAnalyzerApp
+from dux.config.defaults import default_config
+from dux.config.loader import load_config, sample_config_json
+from dux.models.enums import InsightCategory
+from dux.models.insight import Insight
+from dux.models.scan import ScanError, ScanErrorCode, ScanOptions, ScanResult
+from dux.services.insights import filter_insights, generate_insights
+from dux.services.scanner import scan_path
+from dux.services.summary import render_focused_summary, render_summary
+from dux.ui.app import DuxApp
 
 console = Console()
 
@@ -56,7 +56,7 @@ def _render_scan_panel(progress: _ScanProgress, workers: int, phase: str) -> Pan
     )
     return Panel(
         body,
-        title="[bold #81a2be]Disk Analysis - Scanning...[/]",
+        title="[bold #81a2be]dux - Scanning...[/]",
         border_style="#373b41",
     )
 
@@ -263,7 +263,7 @@ def run(
     elif top_files:
         initial_view = "large_file"
 
-    tui = DiskAnalyzerApp(
+    tui = DuxApp(
         root=snapshot.root,
         stats=snapshot.stats,
         bundle=bundle,

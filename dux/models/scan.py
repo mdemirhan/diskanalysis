@@ -6,7 +6,7 @@ from typing import Callable
 
 from result import Result
 
-from diskanalysis.models.enums import NodeKind
+from dux.models.enums import NodeKind
 
 
 ProgressCallback = Callable[[str, int, int], None]

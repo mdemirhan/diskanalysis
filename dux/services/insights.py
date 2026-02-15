@@ -3,11 +3,11 @@ from __future__ import annotations
 import heapq
 from pathlib import Path
 
-from diskanalysis.config.schema import AppConfig, PatternRule
-from diskanalysis.models.enums import InsightCategory
-from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode
-from diskanalysis.services.patterns import CompiledRuleSet, compile_ruleset, match_all
+from dux.config.schema import AppConfig, PatternRule
+from dux.models.enums import InsightCategory
+from dux.models.insight import Insight, InsightBundle
+from dux.models.scan import ScanNode
+from dux.services.patterns import CompiledRuleSet, compile_ruleset, match_all
 
 # Heap entry: (size_bytes, path, Insight).  Using size as the key so the
 # smallest item sits at the top of the min-heap for efficient eviction.

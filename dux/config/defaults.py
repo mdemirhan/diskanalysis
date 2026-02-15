@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from diskanalysis.config.schema import AppConfig, PatternRule
-from diskanalysis.models.enums import InsightCategory
+from dux.config.schema import AppConfig, PatternRule
+from dux.models.enums import InsightCategory
 
 
 def default_config() -> AppConfig:
