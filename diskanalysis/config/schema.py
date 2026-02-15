@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from diskanalysis.models.enums import InsightCategory
 
@@ -65,7 +65,7 @@ _VALID_APPLY_TO: set[str] = {"file", "dir", "both"}
 def _parse_apply_to(value: Any) -> Literal["file", "dir", "both"]:
     raw = str(value)
     if raw in _VALID_APPLY_TO:
-        return raw  # type: ignore[return-value]
+        return cast(Literal["file", "dir", "both"], raw)
     return "both"
 
 

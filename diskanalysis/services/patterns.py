@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
-from functools import lru_cache
 from typing import Literal
 
 from diskanalysis.config.schema import PatternRule
@@ -60,7 +59,6 @@ def _classify(pattern: str) -> _Matcher:
     return _Matcher(_GLOB, pattern.lower(), "")
 
 
-@lru_cache(maxsize=256)
 def _expand_braces(pattern: str) -> tuple[str, ...]:
     start = pattern.find("{")
     end = pattern.find("}", start + 1)
@@ -245,112 +243,39 @@ def match_all(
     matched: list[PatternRule] = []
     seen: set[str] = set()
 
+    def _collect(hits: list[_TaggedRule] | None) -> None:
+        if hits:
+            for tr in hits:
+                cat = tr.rule.category.value
+                if cat not in seen:
+                    seen.add(cat)
+                    matched.append(tr.rule)
+
     # --- EXACT: O(1) dict lookup ---
-    hits = rs.exact_both.get(lbase)
-    if hits:
-        for tr in hits:
-            cat = tr.rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(tr.rule)
-    if is_dir:
-        hits = rs.exact_dir.get(lbase)
-    else:
-        hits = rs.exact_file.get(lbase)
-    if hits:
-        for tr in hits:
-            cat = tr.rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(tr.rule)
+    _collect(rs.exact_both.get(lbase))
+    _collect(rs.exact_dir.get(lbase) if is_dir else rs.exact_file.get(lbase))
 
     # --- CONTAINS: iterate (typically ~15 rules) ---
-    for val, alt, tr in rs.contains_both:
-        if val in lpath or lpath.endswith(alt):
-            cat = tr.rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(tr.rule)
-    if is_dir:
-        for val, alt, tr in rs.contains_dir:
-            if val in lpath or lpath.endswith(alt):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
-    else:
-        for val, alt, tr in rs.contains_file:
-            if val in lpath or lpath.endswith(alt):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
+    _collect(
+        [tr for val, alt, tr in rs.contains_both if val in lpath or lpath.endswith(alt)]
+    )
+    source = rs.contains_dir if is_dir else rs.contains_file
+    _collect([tr for val, alt, tr in source if val in lpath or lpath.endswith(alt)])
 
     # --- ENDSWITH ---
-    for suffix, tr in rs.endswith_both:
-        if lbase.endswith(suffix):
-            cat = tr.rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(tr.rule)
-    if is_dir:
-        for suffix, tr in rs.endswith_dir:
-            if lbase.endswith(suffix):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
-    else:
-        for suffix, tr in rs.endswith_file:
-            if lbase.endswith(suffix):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
+    _collect([tr for suffix, tr in rs.endswith_both if lbase.endswith(suffix)])
+    source2 = rs.endswith_dir if is_dir else rs.endswith_file
+    _collect([tr for suffix, tr in source2 if lbase.endswith(suffix)])
 
     # --- STARTSWITH ---
-    for prefix, tr in rs.startswith_both:
-        if lbase.startswith(prefix):
-            cat = tr.rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(tr.rule)
-    if is_dir:
-        for prefix, tr in rs.startswith_dir:
-            if lbase.startswith(prefix):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
-    else:
-        for prefix, tr in rs.startswith_file:
-            if lbase.startswith(prefix):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
+    _collect([tr for prefix, tr in rs.startswith_both if lbase.startswith(prefix)])
+    source3 = rs.startswith_dir if is_dir else rs.startswith_file
+    _collect([tr for prefix, tr in source3 if lbase.startswith(prefix)])
 
     # --- GLOB fallback ---
-    for pat, tr in rs.glob_both:
-        if _match_pattern_slow(pat, lpath, lbase):
-            cat = tr.rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(tr.rule)
-    if is_dir:
-        for pat, tr in rs.glob_dir:
-            if _match_pattern_slow(pat, lpath, lbase):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
-    else:
-        for pat, tr in rs.glob_file:
-            if _match_pattern_slow(pat, lpath, lbase):
-                cat = tr.rule.category.value
-                if cat not in seen:
-                    seen.add(cat)
-                    matched.append(tr.rule)
+    _collect([tr for pat, tr in rs.glob_both if _match_pattern_slow(pat, lpath, lbase)])
+    source4 = rs.glob_dir if is_dir else rs.glob_file
+    _collect([tr for pat, tr in source4 if _match_pattern_slow(pat, lpath, lbase)])
 
     # --- Additional paths (pre-normalized) ---
     if rs.additional:

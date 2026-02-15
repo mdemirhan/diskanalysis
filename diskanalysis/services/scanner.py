@@ -97,43 +97,57 @@ def scan_path(
     stats_lock = threading.Lock()
     cancelled = threading.Event()
 
-    def emit_progress(current_path: str) -> None:
+    def _is_cancelled() -> bool:
+        if cancelled.is_set():
+            return True
+        if cancel_check is not None and cancel_check():
+            cancelled.set()
+            return True
+        return False
+
+    def emit_progress(current_path: str, local_files: int, local_dirs: int) -> None:
         if progress_callback is None:
             return
         with stats_lock:
-            f, d = stats.files, stats.directories
+            f = stats.files + local_files
+            d = stats.directories + local_dirs
         progress_callback(current_path, f, d)
 
     def run_worker() -> None:
+        local_files = 0
+        local_dirs = 0
+        local_errors = 0
+
+        def _flush_local() -> None:
+            nonlocal local_files, local_dirs, local_errors
+            if local_files or local_dirs or local_errors:
+                with stats_lock:
+                    stats.files += local_files
+                    stats.directories += local_dirs
+                    stats.access_errors += local_errors
+                local_files = local_dirs = local_errors = 0
+
         while True:
             task = q.get()
             if task is None:
+                _flush_local()
                 q.task_done()
                 break
 
-            if cancelled.is_set():
-                q.task_done()
-                continue
-
-            if cancel_check is not None and cancel_check():
-                cancelled.set()
+            if _is_cancelled():
                 q.task_done()
                 continue
 
             try:
                 with os.scandir(task.node.path) as entries:
                     for entry in entries:
-                        if cancelled.is_set():
-                            break
-                        if cancel_check is not None and cancel_check():
-                            cancelled.set()
+                        if _is_cancelled():
                             break
 
                         try:
                             stat_result = entry.stat(follow_symlinks=False)
                         except OSError:
-                            with stats_lock:
-                                stats.access_errors += 1
+                            local_errors += 1
                             continue
 
                         is_dir = statmod.S_ISDIR(stat_result.st_mode)
@@ -148,8 +162,7 @@ def scan_path(
                         task.node.children.append(node)
 
                         if is_dir:
-                            with stats_lock:
-                                stats.directories += 1
+                            local_dirs += 1
                             within_depth = (
                                 options.max_depth is None
                                 or task.depth < options.max_depth
@@ -157,13 +170,12 @@ def scan_path(
                             if within_depth:
                                 q.put(_Task(node, task.depth + 1))
                         else:
-                            with stats_lock:
-                                stats.files += 1
-                        emit_progress(node.path)
+                            local_files += 1
+                        emit_progress(node.path, local_files, local_dirs)
             except OSError:
-                with stats_lock:
-                    stats.access_errors += 1
+                local_errors += 1
             finally:
+                _flush_local()
                 q.task_done()
 
     num_workers = max(1, workers)

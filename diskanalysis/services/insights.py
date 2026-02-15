@@ -6,7 +6,7 @@ from pathlib import Path
 from diskanalysis.config.schema import AppConfig, PatternRule
 from diskanalysis.models.enums import InsightCategory
 from diskanalysis.models.insight import Insight, InsightBundle
-from diskanalysis.models.scan import ScanNode, norm_sep
+from diskanalysis.models.scan import ScanNode
 from diskanalysis.services.patterns import CompiledRuleSet, compile_ruleset, match_all
 
 # Heap entry: (size_bytes, path, Insight).  Using size as the key so the
@@ -44,7 +44,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
         (InsightCategory.CACHE, config.additional_cache_paths),
     ):
         for raw_base in sources:
-            base = norm_sep(str(Path(raw_base).expanduser())).rstrip("/")
+            base = str(Path(raw_base).expanduser()).rstrip("/")
             additional_paths.append(
                 (
                     base,

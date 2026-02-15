@@ -61,7 +61,3 @@ class ScanError:
 
 
 ScanResult = Result[ScanSnapshot, ScanError]
-
-
-def norm_sep(path: str) -> str:
-    return path.replace("\\", "/")

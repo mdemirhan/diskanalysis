@@ -27,11 +27,6 @@ def default_config() -> AppConfig:
             "file",
         ),
         PatternRule(
-            "Python Bytecode",
-            "**/__pycache__/**",
-            InsightCategory.TEMP,
-        ),
-        PatternRule(
             "Pytest Cache",
             "**/.pytest_cache/**",
             InsightCategory.TEMP,

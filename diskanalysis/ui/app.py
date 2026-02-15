@@ -224,6 +224,11 @@ class DiskAnalyzerApp(App[None]):
         self._view_scroll: dict[str, float] = {}
         self._view_filter: dict[str, str] = {}
 
+    def _relative_path(self, absolute_path: str) -> str:
+        if absolute_path.startswith(self._root_prefix):
+            return absolute_path[len(self._root_prefix) :]
+        return absolute_path
+
     def _index_tree(self, root: ScanNode) -> None:
         stack: list[tuple[ScanNode, str | None]] = [(root, None)]
         while stack:
@@ -438,30 +443,37 @@ class DiskAnalyzerApp(App[None]):
         rows = self._top_nodes_rows(NodeKind.FILE)
         return rows, self.stats.files
 
+    def _filtered_page_count(self, state: _PagedState) -> int:
+        if state.all_rows is None:
+            return 1
+        filtered = self._filter_rows(state.all_rows)
+        return max(1, (len(filtered) + self._page_size - 1) // self._page_size)
+
     def _next_page(self) -> None:
-        state = self._paged_states.get(self.current_view)
-        if state is None:
+        if self.current_view not in _PAGED_VIEWS:
             return
-        total_pages = max(
-            1, (state.total_rows + self._page_size - 1) // self._page_size
-        )
-        if state.page_index >= total_pages - 1:
+        state = self._paged_states[self.current_view]
+        if state.page_index >= self._filtered_page_count(state) - 1:
             return
         state.page_index += 1
         self.selected_index = 0
         self._refresh_all()
 
     def _prev_page(self) -> None:
-        state = self._paged_states.get(self.current_view)
-        if state is None or state.page_index == 0:
+        if self.current_view not in _PAGED_VIEWS:
+            return
+        state = self._paged_states[self.current_view]
+        if state.page_index == 0:
             return
         state.page_index -= 1
         self.selected_index = 0
         self._refresh_all()
 
     def _trimmed_indicator(self, view: str) -> str:
-        state = self._paged_states.get(view)
-        if state is None or state.all_rows is None or state.total_items == 0:
+        if view not in _PAGED_VIEWS:
+            return ""
+        state = self._paged_states[view]
+        if state.all_rows is None or state.total_items == 0:
             return ""
         if state.total_rows < state.total_items:
             return f"Showing {state.total_rows:,} of {state.total_items:,} results"
@@ -528,13 +540,8 @@ class DiskAnalyzerApp(App[None]):
         ]
 
         top_dirs = top_nodes(self.root, self._overview_top, NodeKind.DIRECTORY)
-        root_prefix = self._root_prefix
         for node in top_dirs:
-            display_path = (
-                node.path[len(root_prefix) :]
-                if node.path.startswith(root_prefix)
-                else node.path
-            )
+            display_path = self._relative_path(node.path)
             rows.append(
                 DisplayRow(
                     path=node.path,
@@ -570,16 +577,11 @@ class DiskAnalyzerApp(App[None]):
         return rows
 
     def _insight_rows(self, predicate: Callable[[Insight], bool]) -> list[DisplayRow]:
-        root_prefix = self._root_prefix
         rows: list[DisplayRow] = []
         for item in self.bundle.insights:
             if not predicate(item):
                 continue
-            display_path = (
-                item.path[len(root_prefix) :]
-                if item.path.startswith(root_prefix)
-                else item.path
-            )
+            display_path = self._relative_path(item.path)
             label = _CATEGORY_LABELS.get(item.category.value, item.category.value)
             node = self.node_by_path.get(item.path)
             type_label = "Folder" if node is not None and node.is_dir else "File"
@@ -595,14 +597,9 @@ class DiskAnalyzerApp(App[None]):
         return rows
 
     def _top_nodes_rows(self, kind: NodeKind) -> list[DisplayRow]:
-        root_prefix = self._root_prefix
         rows: list[DisplayRow] = []
         for node in top_nodes(self.root, self._top_n_limit, kind):
-            display_path = (
-                node.path[len(root_prefix) :]
-                if node.path.startswith(root_prefix)
-                else node.path
-            )
+            display_path = self._relative_path(node.path)
             rows.append(
                 DisplayRow(
                     path=node.path,
@@ -779,13 +776,10 @@ class DiskAnalyzerApp(App[None]):
             self.notify("Failed to copy to clipboard", severity="error", timeout=2)
 
     @on(DataTable.RowSelected)
-    def _on_row_selected(self, event: DataTable.RowSelected) -> None:
-        if event.cursor_row != self.selected_index:
-            self.selected_index = event.cursor_row
-            self._render_footer_rows()
-
     @on(DataTable.RowHighlighted)
-    def _on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+    def _on_row_cursor_changed(
+        self, event: DataTable.RowSelected | DataTable.RowHighlighted
+    ) -> None:
         if event.cursor_row != self.selected_index:
             self.selected_index = event.cursor_row
             self._render_footer_rows()
