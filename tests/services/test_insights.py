@@ -67,9 +67,7 @@ def test_build_artifact_detection() -> None:
     )
     bundle = generate_insights(_tree_with(node), config)
 
-    assert any(
-        item.category is InsightCategory.BUILD_ARTIFACT for item in bundle.insights
-    )
+    assert any(item.category is InsightCategory.BUILD_ARTIFACT for item in bundle.insights)
 
 
 def test_dedup_by_path() -> None:
@@ -121,6 +119,4 @@ def test_case_insensitive_directory_matching() -> None:
     )
     bundle = generate_insights(_tree_with(node), config)
 
-    assert any(
-        item.category is InsightCategory.BUILD_ARTIFACT for item in bundle.insights
-    )
+    assert any(item.category is InsightCategory.BUILD_ARTIFACT for item in bundle.insights)

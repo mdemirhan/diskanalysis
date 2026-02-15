@@ -19,9 +19,7 @@ class MemoryFileSystem:
         self._entries: dict[str, _MockEntry] = {}
 
     def add_dir(self, path: str, mtime: float = 0.0) -> MemoryFileSystem:
-        self._entries[self._normalize(path)] = _MockEntry(
-            is_dir=True, size=0, mtime=mtime, content=""
-        )
+        self._entries[self._normalize(path)] = _MockEntry(is_dir=True, size=0, mtime=mtime, content="")
         return self
 
     def add_file(
@@ -36,12 +34,8 @@ class MemoryFileSystem:
         for parent in reversed(PurePosixPath(key).parents):
             pk = str(parent)
             if pk not in self._entries:
-                self._entries[pk] = _MockEntry(
-                    is_dir=True, size=0, mtime=0.0, content=""
-                )
-        self._entries[key] = _MockEntry(
-            is_dir=False, size=size, mtime=mtime, content=content
-        )
+                self._entries[pk] = _MockEntry(is_dir=True, size=0, mtime=0.0, content="")
+        self._entries[key] = _MockEntry(is_dir=False, size=size, mtime=mtime, content=content)
         return self
 
     def expanduser(self, path: str) -> str:

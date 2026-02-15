@@ -17,10 +17,8 @@ from result import Err
 
 from dux.config.defaults import default_config
 from dux.config.loader import load_config, sample_config_json
-from dux.models.enums import InsightCategory
-from dux.models.insight import Insight
 from dux.models.scan import ScanError, ScanErrorCode, ScanOptions, ScanResult
-from dux.services.insights import filter_insights, generate_insights
+from dux.services.insights import generate_insights
 from dux.services.scanner import scan_path
 from dux.services.summary import render_focused_summary, render_summary
 from dux.ui.app import DuxApp
@@ -81,9 +79,7 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
     def scan_worker() -> None:
         nonlocal result
         try:
-            result = scan_path(
-                path, options, progress_callback=on_progress, workers=workers
-            )
+            result = scan_path(path, options, progress_callback=on_progress, workers=workers)
         except Exception as exc:  # noqa: BLE001
             result = Err(
                 ScanError(
@@ -107,9 +103,7 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
         while not done.is_set():
             with lock:
                 snapshot = replace(progress)
-            live.update(
-                _render_scan_panel(snapshot, workers, "Scanning directory tree...")
-            )
+            live.update(_render_scan_panel(snapshot, workers, "Scanning directory tree..."))
             time.sleep(0.08)
 
         with lock:
@@ -130,46 +124,22 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
 
 def run(
     path: Annotated[str, typer.Argument(help="Path to analyze.")] = ".",
-    temp: Annotated[
-        bool, typer.Option("--temp", "-t", help="Focus on temp/build artifacts.")
-    ] = False,
-    cache: Annotated[
-        bool, typer.Option("--cache", "-c", help="Focus on caches.")
-    ] = False,
-    top_folders: Annotated[
-        bool, typer.Option("--top-folders", help="Focus on largest folders.")
-    ] = False,
-    top_files: Annotated[
-        bool, typer.Option("--top-files", help="Focus on largest files.")
-    ] = False,
-    summary: Annotated[
-        bool, typer.Option("--summary", "-s", help="Render non-interactive summary.")
-    ] = False,
-    sample_config: Annotated[
-        bool, typer.Option("--sample-config", help="Print sample config JSON.")
-    ] = False,
-    max_depth: Annotated[
-        int | None, typer.Option("--max-depth", help="Max directory depth to scan.")
-    ] = None,
-    workers: Annotated[
-        int | None, typer.Option("--workers", "-w", help="Number of scan workers.")
-    ] = None,
+    temp: Annotated[bool, typer.Option("--temp", "-t", help="Focus on temp/build artifacts.")] = False,
+    cache: Annotated[bool, typer.Option("--cache", "-c", help="Focus on caches.")] = False,
+    top_folders: Annotated[bool, typer.Option("--top-folders", help="Focus on largest folders.")] = False,
+    top_files: Annotated[bool, typer.Option("--top-files", help="Focus on largest files.")] = False,
+    summary: Annotated[bool, typer.Option("--summary", "-s", help="Render non-interactive summary.")] = False,
+    sample_config: Annotated[bool, typer.Option("--sample-config", help="Print sample config JSON.")] = False,
+    max_depth: Annotated[int | None, typer.Option("--max-depth", help="Max directory depth to scan.")] = None,
+    workers: Annotated[int | None, typer.Option("--workers", "-w", help="Number of scan workers.")] = None,
     top: Annotated[
         int | None,
         typer.Option("--top", help="Number of top items to show in summary."),
     ] = None,
-    max_insights: Annotated[
-        int | None, typer.Option("--max-insights", help="Max insights per category.")
-    ] = None,
-    overview_folders: Annotated[
-        int | None, typer.Option("--overview-folders", help="Top folders in overview.")
-    ] = None,
-    scroll_step: Annotated[
-        int | None, typer.Option("--scroll-step", help="Lines to jump on PgUp/PgDn.")
-    ] = None,
-    page_size: Annotated[
-        int | None, typer.Option("--page-size", help="Rows per page in TUI.")
-    ] = None,
+    max_insights: Annotated[int | None, typer.Option("--max-insights", help="Max insights per category.")] = None,
+    overview_folders: Annotated[int | None, typer.Option("--overview-folders", help="Top folders in overview.")] = None,
+    scroll_step: Annotated[int | None, typer.Option("--scroll-step", help="Lines to jump on PgUp/PgDn.")] = None,
+    page_size: Annotated[int | None, typer.Option("--page-size", help="Rows per page in TUI.")] = None,
 ) -> None:
     if sys.platform == "win32":
         console.print("[red]Windows support is not implemented yet.[/]")
@@ -210,9 +180,7 @@ def run(
         max_depth=config.max_depth,
     )
 
-    scan_result = _scan_with_progress(
-        Path(path), scan_options, workers=config.scan_workers
-    )
+    scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers)
     if isinstance(scan_result, Err):
         error = scan_result.unwrap_err()
         console.print(f"[red]Scan failed for {error.path}: {error.message}[/]")
@@ -226,30 +194,14 @@ def run(
         if not has_focus:
             render_summary(console, snapshot.root, snapshot.stats, bundle, config)
         else:
-            sections: list[tuple[str, list[Insight]]] = []
-            if temp:
-                sections.append(
-                    (
-                        "Largest Temporary Files",
-                        filter_insights(
-                            bundle,
-                            {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT},
-                        ),
-                    )
-                )
-            if cache:
-                sections.append(
-                    (
-                        "Largest Cache Files",
-                        filter_insights(bundle, {InsightCategory.CACHE}),
-                    )
-                )
             render_focused_summary(
                 console,
                 snapshot.root,
                 snapshot.stats,
-                sections,
+                bundle,
                 config.summary_top_count,
+                temp=temp,
+                cache=cache,
                 top_folders=top_folders,
                 top_files=top_files,
             )

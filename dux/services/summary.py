@@ -5,10 +5,11 @@ from rich.panel import Panel
 from rich.table import Table
 
 from dux.config.schema import AppConfig
-from dux.models.enums import NodeKind
+from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import Insight, InsightBundle
 from dux.models.scan import ScanNode, ScanStats
 from dux.services.formatting import format_bytes
+from dux.services.insights import filter_insights
 from dux.services.tree import top_nodes
 
 
@@ -76,9 +77,7 @@ def render_summary(
     cat_table.add_column("Category")
     cat_table.add_column("Count", justify="right")
     cat_table.add_column("Size", justify="right")
-    for category, (count, total) in sorted(
-        by_category.items(), key=lambda x: x[1][1], reverse=True
-    ):
+    for category, (count, total) in sorted(by_category.items(), key=lambda x: x[1][1], reverse=True):
         cat_table.add_row(category, str(count), format_bytes(total))
     console.print(cat_table)
 
@@ -87,19 +86,24 @@ def render_focused_summary(
     console: Console,
     root: ScanNode,
     stats: ScanStats,
-    sections: list[tuple[str, list[Insight]]],
+    bundle: InsightBundle,
     top_n: int,
+    *,
+    temp: bool = False,
+    cache: bool = False,
     top_folders: bool = False,
     top_files: bool = False,
 ) -> None:
     console.print(_stats_panel(root, stats))
 
-    for title, insights in sections:
-        console.print(_insights_table(title, insights, top_n))
+    if temp:
+        insights = filter_insights(bundle, {InsightCategory.TEMP, InsightCategory.BUILD_ARTIFACT})
+        console.print(_insights_table("Largest Temporary Files/Folders", insights, top_n))
+    if cache:
+        insights = filter_insights(bundle, {InsightCategory.CACHE})
+        console.print(_insights_table("Largest Cache Files/Folders", insights, top_n))
 
     if top_folders:
-        console.print(
-            _top_nodes_table("Largest Folders", root, top_n, NodeKind.DIRECTORY)
-        )
+        console.print(_top_nodes_table("Largest Folders", root, top_n, NodeKind.DIRECTORY))
     if top_files:
         console.print(_top_nodes_table("Largest Files", root, top_n, NodeKind.FILE))

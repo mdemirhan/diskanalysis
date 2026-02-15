@@ -21,9 +21,5 @@ def top_nodes(root: ScanNode, n: int, kind: NodeKind | None = None) -> list[Scan
 
     When *kind* is given, only nodes of that kind are considered.
     """
-    items = (
-        node
-        for node in iter_nodes(root)
-        if node.path != root.path and (kind is None or node.kind is kind)
-    )
+    items = (node for node in iter_nodes(root) if node.path != root.path and (kind is None or node.kind is kind))
     return heapq.nlargest(n, items, key=lambda node: node.size_bytes)

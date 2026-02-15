@@ -11,9 +11,7 @@ from dux.services.fs import DEFAULT_FS, FileSystem
 CONFIG_PATH = "~/.config/dux/config.json"
 
 
-def load_config(
-    path: str | None = None, fs: FileSystem = DEFAULT_FS
-) -> Result[AppConfig, str]:
+def load_config(path: str | None = None, fs: FileSystem = DEFAULT_FS) -> Result[AppConfig, str]:
     resolved = path or fs.expanduser(CONFIG_PATH)
     if not fs.exists(resolved):
         return Ok(default_config())

@@ -56,6 +56,9 @@ reportAny = false
 reportCallInDefaultInitializer = "none"
 reportMissingParameterType = "none"
 
+[tool.ruff]
+line-length = 120
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.38.0",

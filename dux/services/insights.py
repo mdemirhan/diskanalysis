@@ -69,17 +69,13 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     )
 
     # --- per-category min-heaps ---
-    heaps: dict[InsightCategory, list[_HeapEntry]] = {
-        cat: [] for cat in InsightCategory
-    }
+    heaps: dict[InsightCategory, list[_HeapEntry]] = {cat: [] for cat in InsightCategory}
     seen: dict[InsightCategory, dict[str, int]] = {cat: {} for cat in InsightCategory}
 
     # --- aggregate counters (track *all* matches, not just top-K) ---
     category_counts: dict[InsightCategory, int] = {}
     category_sizes: dict[InsightCategory, int] = {}
-    category_paths: dict[InsightCategory, set[str]] = {
-        cat: set() for cat in InsightCategory
-    }
+    category_paths: dict[InsightCategory, set[str]] = {cat: set() for cat in InsightCategory}
 
     def _record(insight: Insight) -> None:
         cat = insight.category
@@ -159,7 +155,5 @@ def _insight_from_rule(node: ScanNode, rule: PatternRule) -> Insight:
     )
 
 
-def filter_insights(
-    bundle: InsightBundle, categories: set[InsightCategory]
-) -> list[Insight]:
+def filter_insights(bundle: InsightBundle, categories: set[InsightCategory]) -> list[Insight]:
     return [item for item in bundle.insights if item.category in categories]

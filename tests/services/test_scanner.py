@@ -103,9 +103,7 @@ def test_progress_callback_invoked() -> None:
     def on_progress(path: str, files: int, dirs: int) -> None:
         calls.append((path, files, dirs))
 
-    result = scan_path(
-        "/root", ScanOptions(), progress_callback=on_progress, workers=1, fs=fs
-    )
+    result = scan_path("/root", ScanOptions(), progress_callback=on_progress, workers=1, fs=fs)
     assert isinstance(result, Ok)
     assert len(calls) >= 1
     for _, files, _ in calls:

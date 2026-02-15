@@ -49,9 +49,7 @@ class DisplayRow:
 
 _PAGED_VIEWS = {"temp", "large_dir", "large_file"}
 
-_TEMP_CATEGORIES = frozenset(
-    {InsightCategory.TEMP, InsightCategory.CACHE, InsightCategory.BUILD_ARTIFACT}
-)
+_TEMP_CATEGORIES = frozenset({InsightCategory.TEMP, InsightCategory.CACHE, InsightCategory.BUILD_ARTIFACT})
 
 
 class _PagedState:
@@ -217,9 +215,7 @@ class DuxApp(App[None]):
         self.selected_index = 0
         self.pending_g = False
         self._rows_cache: dict[str, list[DisplayRow]] = {}
-        self._paged_states: dict[str, _PagedState] = {
-            v: _PagedState() for v in _PAGED_VIEWS
-        }
+        self._paged_states: dict[str, _PagedState] = {v: _PagedState() for v in _PAGED_VIEWS}
         self._view_cursor: dict[str, int] = {}
         self._view_scroll: dict[str, float] = {}
         self._view_filter: dict[str, str] = {}
@@ -275,9 +271,7 @@ class DuxApp(App[None]):
         self._invalidate_rows("browse")
 
     def _render_header_rows(self) -> None:
-        self.query_one("#path-row", Static).update(
-            Text.from_markup(f"[#81a2be]Path:[/] {self.root.path}")
-        )
+        self.query_one("#path-row", Static).update(Text.from_markup(f"[#81a2be]Path:[/] {self.root.path}"))
 
         tab_items: list[str] = []
         for tab in TABS:
@@ -286,9 +280,7 @@ class DuxApp(App[None]):
                 tab_items.append(f"[bold #1d1f21 on #b5bd68] {label} [/] ")
             else:
                 tab_items.append(f"[#c5c8c6 on #373b41] {label} [/] ")
-        self.query_one("#tabs-row", Static).update(
-            Text.from_markup(" ".join(tab_items))
-        )
+        self.query_one("#tabs-row", Static).update(Text.from_markup(" ".join(tab_items)))
 
     def _render_content_table(self) -> None:
         table = self.query_one("#content-table", DataTable)
@@ -319,23 +311,17 @@ class DuxApp(App[None]):
 
         self.rows = self._build_rows_for_current_view()
         if not self.rows:
-            self.rows = [
-                DisplayRow(path=".", name="(no data)", size_bytes=0, detail="-")
-            ]
+            self.rows = [DisplayRow(path=".", name="(no data)", size_bytes=0, detail="-")]
 
         total = max(
             1,
-            self.rows[0].size_bytes
-            if self.current_view == "browse"
-            else self.root.size_bytes,
+            self.rows[0].size_bytes if self.current_view == "browse" else self.root.size_bytes,
         )
         is_temp = self.current_view == "temp"
         is_browse = self.current_view == "browse"
         for row in self.rows:
             size_text = format_bytes(row.size_bytes) if row.size_bytes > 0 else ""
-            bar_text = (
-                relative_bar(row.size_bytes, total, 18) if row.size_bytes > 0 else ""
-            )
+            bar_text = relative_bar(row.size_bytes, total, 18) if row.size_bytes > 0 else ""
             if is_temp:
                 table.add_row(row.name, size_text, row.type_label, row.detail)
             elif is_browse:
@@ -390,9 +376,7 @@ class DuxApp(App[None]):
             pad = width - len(left) - len(hints)
             status = left + " " * max(gap, pad) + hints
 
-        self.query_one("#status-row", Static).update(
-            Text.from_markup(f"[#969896]{status}[/]")
-        )
+        self.query_one("#status-row", Static).update(Text.from_markup(f"[#969896]{status}[/]"))
 
     def _build_rows_for_current_view(self) -> list[DisplayRow]:
         if self.current_view in _PAGED_VIEWS:
@@ -427,14 +411,7 @@ class DuxApp(App[None]):
     def _build_all_paged_rows(self, view: str) -> tuple[list[DisplayRow], int]:
         if view == "temp":
             rows = self._insight_rows(lambda i: i.category in _TEMP_CATEGORIES)
-            total_items = len(
-                set().union(
-                    *(
-                        self.bundle.category_paths.get(cat, set())
-                        for cat in _TEMP_CATEGORIES
-                    )
-                )
-            )
+            total_items = len(set().union(*(self.bundle.category_paths.get(cat, set()) for cat in _TEMP_CATEGORIES)))
             return rows, total_items
         if view == "large_dir":
             rows = self._top_nodes_rows(NodeKind.DIRECTORY)
@@ -776,9 +753,7 @@ class DuxApp(App[None]):
 
     @on(DataTable.RowSelected)
     @on(DataTable.RowHighlighted)
-    def _on_row_cursor_changed(
-        self, event: DataTable.RowSelected | DataTable.RowHighlighted
-    ) -> None:
+    def _on_row_cursor_changed(self, event: DataTable.RowSelected | DataTable.RowHighlighted) -> None:
         if event.cursor_row != self.selected_index:
             self.selected_index = event.cursor_row
             self._render_footer_rows()
@@ -889,9 +864,7 @@ class DuxApp(App[None]):
         if self._handle_global_key(key):
             return
         if key == "y":
-            self._yank(
-                lambda row: shlex.quote(row.path) if row.path else shlex.quote(row.name)
-            )
+            self._yank(lambda row: shlex.quote(row.path) if row.path else shlex.quote(row.name))
             return
         if key in {"Y", "shift+y"} or char == "Y":
             self._yank(lambda row: shlex.quote(row.name))

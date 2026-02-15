@@ -43,9 +43,7 @@ class AppConfig:
             "scrollStep": self.scroll_step,
             "tempPatterns": [_rule_to_dict(rule) for rule in self.temp_patterns],
             "cachePatterns": [_rule_to_dict(rule) for rule in self.cache_patterns],
-            "buildArtifactPatterns": [
-                _rule_to_dict(rule) for rule in self.build_artifact_patterns
-            ],
+            "buildArtifactPatterns": [_rule_to_dict(rule) for rule in self.build_artifact_patterns],
         }
 
 
@@ -83,27 +81,17 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
     max_depth_raw = data.get("maxDepth", defaults.max_depth)
 
     return AppConfig(
-        additional_temp_paths=[
-            str(x)
-            for x in data.get("additionalTempPaths", defaults.additional_temp_paths)
-        ],
-        additional_cache_paths=[
-            str(x)
-            for x in data.get("additionalCachePaths", defaults.additional_cache_paths)
-        ],
+        additional_temp_paths=[str(x) for x in data.get("additionalTempPaths", defaults.additional_temp_paths)],
+        additional_cache_paths=[str(x) for x in data.get("additionalCachePaths", defaults.additional_cache_paths)],
         max_depth=int(max_depth_raw) if max_depth_raw is not None else None,
         scan_workers=max(1, int(data.get("scanWorkers", defaults.scan_workers))),
-        summary_top_count=max(
-            1, int(data.get("summaryTopCount", defaults.summary_top_count))
-        ),
+        summary_top_count=max(1, int(data.get("summaryTopCount", defaults.summary_top_count))),
         page_size=max(10, int(data.get("pageSize", defaults.page_size))),
         max_insights_per_category=max(
             10,
             int(data.get("maxInsightsPerCategory", defaults.max_insights_per_category)),
         ),
-        overview_top_folders=max(
-            5, int(data.get("overviewTopFolders", defaults.overview_top_folders))
-        ),
+        overview_top_folders=max(5, int(data.get("overviewTopFolders", defaults.overview_top_folders))),
         scroll_step=max(1, int(data.get("scrollStep", defaults.scroll_step))),
         temp_patterns=[_rule_from_dict(x) for x in data["tempPatterns"]]
         if "tempPatterns" in data
@@ -111,9 +99,7 @@ def from_dict(data: dict[str, Any], defaults: AppConfig) -> AppConfig:
         cache_patterns=[_rule_from_dict(x) for x in data["cachePatterns"]]
         if "cachePatterns" in data
         else list(defaults.cache_patterns),
-        build_artifact_patterns=[
-            _rule_from_dict(x) for x in data["buildArtifactPatterns"]
-        ]
+        build_artifact_patterns=[_rule_from_dict(x) for x in data["buildArtifactPatterns"]]
         if "buildArtifactPatterns" in data
         else list(defaults.build_artifact_patterns),
     )

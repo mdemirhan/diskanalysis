@@ -180,30 +180,16 @@ def _add_matcher(
     apply_to: Literal["file", "dir", "both"],
 ) -> None:
     if m.kind == _EXACT:
-        target = (
-            rs.exact_both
-            if apply_to == "both"
-            else rs.exact_file
-            if apply_to == "file"
-            else rs.exact_dir
-        )
+        target = rs.exact_both if apply_to == "both" else rs.exact_file if apply_to == "file" else rs.exact_dir
         target.setdefault(m.value, []).append(tagged)
     elif m.kind == _CONTAINS:
         target_list = (
-            rs.contains_both
-            if apply_to == "both"
-            else rs.contains_file
-            if apply_to == "file"
-            else rs.contains_dir
+            rs.contains_both if apply_to == "both" else rs.contains_file if apply_to == "file" else rs.contains_dir
         )
         target_list.append((m.value, m.alt, tagged))
     elif m.kind == _ENDSWITH:
         target_list = (
-            rs.endswith_both
-            if apply_to == "both"
-            else rs.endswith_file
-            if apply_to == "file"
-            else rs.endswith_dir
+            rs.endswith_both if apply_to == "both" else rs.endswith_file if apply_to == "file" else rs.endswith_dir
         )
         target_list.append((m.value, tagged))
     elif m.kind == _STARTSWITH:
@@ -216,13 +202,7 @@ def _add_matcher(
         )
         target_list.append((m.value, tagged))
     else:  # _GLOB
-        target_list = (
-            rs.glob_both
-            if apply_to == "both"
-            else rs.glob_file
-            if apply_to == "file"
-            else rs.glob_dir
-        )
+        target_list = rs.glob_both if apply_to == "both" else rs.glob_file if apply_to == "file" else rs.glob_dir
         target_list.append((m.value, tagged))
 
 
@@ -256,9 +236,7 @@ def match_all(
     _collect(rs.exact_dir.get(lbase) if is_dir else rs.exact_file.get(lbase))
 
     # --- CONTAINS: iterate (typically ~15 rules) ---
-    _collect(
-        [tr for val, alt, tr in rs.contains_both if val in lpath or lpath.endswith(alt)]
-    )
+    _collect([tr for val, alt, tr in rs.contains_both if val in lpath or lpath.endswith(alt)])
     source = rs.contains_dir if is_dir else rs.contains_file
     _collect([tr for val, alt, tr in source if val in lpath or lpath.endswith(alt)])
 

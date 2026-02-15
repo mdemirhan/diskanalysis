@@ -161,9 +161,7 @@ def scan_path(
 
                     if st.is_dir:
                         local_dirs += 1
-                        within_depth = (
-                            options.max_depth is None or task.depth < options.max_depth
-                        )
+                        within_depth = options.max_depth is None or task.depth < options.max_depth
                         if within_depth:
                             q.put(_Task(node, task.depth + 1))
                     else:
@@ -178,9 +176,7 @@ def scan_path(
                 q.task_done()
 
     num_workers = max(1, workers)
-    threads = [
-        threading.Thread(target=run_worker, daemon=True) for _ in range(num_workers)
-    ]
+    threads = [threading.Thread(target=run_worker, daemon=True) for _ in range(num_workers)]
     for thread in threads:
         thread.start()
     q.join()
