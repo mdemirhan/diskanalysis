@@ -3,7 +3,7 @@ from __future__ import annotations
 from result import Err, Ok
 
 from dux.models.scan import ScanErrorCode, ScanOptions
-from dux.services.scanner import scan_path
+from dux.scan import PythonScanner
 from tests.fs_mock import MemoryFileSystem
 
 
@@ -17,7 +17,7 @@ def test_scanner_returns_valid_results() -> None:
         .add_file("/root/sub/nested.bin", size=64)
     )
 
-    result = scan_path("/root", ScanOptions(), workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/root", ScanOptions())
 
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
@@ -29,7 +29,7 @@ def test_scanner_returns_valid_results() -> None:
 def test_missing_path_returns_error() -> None:
     fs = MemoryFileSystem()
 
-    result = scan_path("/does-not-exist", ScanOptions(), workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/does-not-exist", ScanOptions())
 
     assert isinstance(result, Err)
     error = result.unwrap_err()
@@ -46,7 +46,7 @@ def test_children_sorted_by_size_descending() -> None:
         .add_file("/root/c.bin", size=50)
     )
 
-    result = scan_path("/root", ScanOptions(), workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/root", ScanOptions())
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
 
@@ -63,7 +63,7 @@ def test_max_depth_respected() -> None:
         .add_file("/root/lvl1/lvl2/f.bin", size=20)
     )
 
-    result = scan_path("/root", ScanOptions(max_depth=0), workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/root", ScanOptions(max_depth=0))
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
 
@@ -86,7 +86,7 @@ def test_access_error_counted() -> None:
 
     fs.scandir = patched_scandir  # type: ignore[assignment]
 
-    result = scan_path("/root", ScanOptions(), workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/root", ScanOptions())
     assert isinstance(result, Ok)
     snapshot = result.unwrap()
     assert snapshot.stats.access_errors == 1
@@ -103,7 +103,7 @@ def test_progress_callback_invoked() -> None:
     def on_progress(path: str, files: int, dirs: int) -> None:
         calls.append((path, files, dirs))
 
-    result = scan_path("/root", ScanOptions(), progress_callback=on_progress, workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/root", ScanOptions(), progress_callback=on_progress)
     assert isinstance(result, Ok)
     assert len(calls) >= 1
     for _, files, _ in calls:
@@ -122,7 +122,7 @@ def test_cancellation_respected() -> None:
         calls += 1
         return calls > 2
 
-    result = scan_path("/root", ScanOptions(), cancel_check=cancel, workers=1, fs=fs)
+    result = PythonScanner(workers=1, fs=fs).scan("/root", ScanOptions(), cancel_check=cancel)
     assert isinstance(result, Err)
     error = result.unwrap_err()
     assert error.code is ScanErrorCode.CANCELLED

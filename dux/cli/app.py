@@ -19,8 +19,8 @@ from result import Err
 from dux.config.defaults import default_config
 from dux.config.loader import load_config, sample_config_json
 from dux.models.scan import ScanError, ScanErrorCode, ScanOptions, ScanResult
+from dux.scan import PythonScanner, Scanner, default_scanner
 from dux.services.insights import generate_insights
-from dux.services.scanner import scan_path
 from dux.services.summary import render_focused_summary, render_summary
 from dux.ui.app import DuxApp
 
@@ -60,7 +60,7 @@ def _render_scan_panel(progress: _ScanProgress, workers: int, phase: str) -> Pan
     )
 
 
-def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanResult:
+def _scan_with_progress(path: Path, options: ScanOptions, workers: int, scanner: Scanner) -> ScanResult:
     lock = threading.Lock()
     done = threading.Event()
     result: ScanResult | None = None
@@ -80,7 +80,7 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int) -> ScanR
     def scan_worker() -> None:
         nonlocal result
         try:
-            result = scan_path(path, options, progress_callback=on_progress, workers=workers)
+            result = scanner.scan(str(path), options, progress_callback=on_progress)
         except Exception as exc:  # noqa: BLE001
             result = Err(
                 ScanError(
@@ -142,6 +142,9 @@ def run(
     scroll_step: Annotated[int | None, typer.Option("--scroll-step", help="Lines to jump on PgUp/PgDn.")] = None,
     page_size: Annotated[int | None, typer.Option("--page-size", help="Rows per page in TUI.")] = None,
     show_size: Annotated[bool, typer.Option("--show-size", "-s", help="Show logical file size column.")] = False,
+    scanner: Annotated[
+        str, typer.Option("--scanner", "-S", help="Scanner variant: auto, python, native, bulk.")
+    ] = "auto",
 ) -> None:
     if sys.platform == "win32":
         console.print("[red]Windows support is not implemented yet.[/]")
@@ -180,7 +183,24 @@ def run(
         max_depth=config.max_depth,
     )
 
-    scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers)
+    scanner_impl: Scanner
+    if scanner == "auto":
+        scanner_impl = default_scanner(workers=config.scan_workers)
+    elif scanner == "python":
+        scanner_impl = PythonScanner(workers=config.scan_workers)
+    elif scanner == "native":
+        from dux.scan.native_scanner import NativeScanner
+
+        scanner_impl = NativeScanner(workers=config.scan_workers)
+    elif scanner == "bulk":
+        from dux.scan.bulk_scanner import BulkScanner
+
+        scanner_impl = BulkScanner(workers=config.scan_workers)
+    else:
+        console.print(f"[red]Unknown scanner: {scanner}. Use: auto, python, native, bulk.[/]")
+        raise typer.Exit(1)
+
+    scan_result = _scan_with_progress(Path(path), scan_options, workers=config.scan_workers, scanner=scanner_impl)
     if isinstance(scan_result, Err):
         error = scan_result.unwrap_err()
         console.print(f"[red]Scan failed for {escape(error.path)}: {escape(error.message)}[/]")

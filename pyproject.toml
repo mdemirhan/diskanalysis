@@ -21,11 +21,15 @@ dev = [
 dux = "dux.cli.app:cli"
 
 [build-system]
-requires = ["hatchling>=1.27.0"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["dux*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 
 [tool.basedpyright]

@@ -6,6 +6,26 @@ from collections.abc import Iterator
 from dux.models.enums import NodeKind
 from dux.models.scan import ScanNode
 
+# Shared empty list for file nodes — saves ~56 bytes per file vs a unique [].
+# IMPORTANT: never append to this; only directory nodes get their own mutable [].
+LEAF_CHILDREN: list[ScanNode] = []
+
+
+def finalize_sizes(root: ScanNode) -> None:
+    """Bottom-up pass: sum children sizes into directory nodes and sort by disk_usage."""
+    stack: list[ScanNode] = []
+    visit: list[ScanNode] = [root]
+    while visit:
+        node = visit.pop()
+        if not node.is_dir:
+            continue
+        stack.append(node)
+        visit.extend(node.children)
+    for node in reversed(stack):
+        node.size_bytes = sum(child.size_bytes for child in node.children)
+        node.disk_usage = sum(child.disk_usage for child in node.children)
+        node.children.sort(key=lambda x: x.disk_usage, reverse=True)
+
 
 def iter_nodes(root: ScanNode) -> Iterator[ScanNode]:
     """Iterate all nodes in the tree rooted at *root* (depth-first)."""
