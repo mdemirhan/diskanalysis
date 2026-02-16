@@ -219,6 +219,11 @@ def match_all(
     *raw_path* is the original-case path for additional path matching.
 
     Returns at most one rule per category (first match wins).
+
+    Perf: this function is called once per node during the insight traversal
+    (millions of times on large trees).  All matching is done via inline
+    ``for`` loops instead of list comprehensions to avoid allocating ~10
+    temporary lists per call.  Do not refactor back to comprehensions.
     """
     matched: list[PatternRule] = []
     seen: set[str] = set()
