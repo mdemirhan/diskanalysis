@@ -751,16 +751,26 @@ static PyMethodDef walker_methods[] = {
     {NULL, NULL, 0, NULL}
 };
 
+#ifdef Py_GIL_DISABLED
+static PyModuleDef_Slot walker_slots[] = {
+    {Py_mod_gil, Py_MOD_GIL_NOT_USED},
+    {0, NULL}
+};
+#endif
+
 static struct PyModuleDef walker_module = {
     PyModuleDef_HEAD_INIT,
-    "dux._walker",
-    "Fast C directory walker for dux.",
-    -1,
-    walker_methods
+    .m_name = "dux._walker",
+    .m_doc = "Fast C directory walker for dux.",
+    .m_size = 0,
+    .m_methods = walker_methods,
+#ifdef Py_GIL_DISABLED
+    .m_slots = walker_slots,
+#endif
 };
 
 PyMODINIT_FUNC
 PyInit__walker(void)
 {
-    return PyModule_Create(&walker_module);
+    return PyModuleDef_Init(&walker_module);
 }

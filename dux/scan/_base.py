@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import queue
+import collections
+import collections.abc
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -27,6 +28,57 @@ from dux.services.tree import finalize_sizes
 class _Task:
     node: ScanNode
     depth: int
+
+
+class _WorkQueue:
+    """Lightweight work queue with a single lock (vs 3 in queue.Queue)."""
+
+    __slots__ = ("_deque", "_lock", "_not_empty", "_outstanding", "_done", "_shutdown")
+
+    def __init__(self) -> None:
+        self._deque: collections.deque[_Task] = collections.deque()
+        self._lock = threading.Lock()
+        self._not_empty = threading.Condition(self._lock)
+        self._outstanding = 0
+        self._done = threading.Event()
+        self._shutdown = False
+
+    def put(self, task: _Task) -> None:
+        with self._lock:
+            self._deque.append(task)
+            self._outstanding += 1
+            self._not_empty.notify(1)
+
+    def put_many(self, tasks: collections.abc.Iterable[_Task]) -> None:
+        with self._lock:
+            prev = len(self._deque)
+            self._deque.extend(tasks)
+            added = len(self._deque) - prev
+            self._outstanding += added
+            if added:
+                self._not_empty.notify(added)
+
+    def get(self) -> _Task | None:
+        with self._not_empty:
+            while not self._deque:
+                if self._shutdown:
+                    return None
+                self._not_empty.wait()
+            return self._deque.popleft()
+
+    def task_done(self) -> None:
+        with self._lock:
+            self._outstanding -= 1
+            if self._outstanding == 0:
+                self._done.set()
+
+    def join(self) -> None:
+        self._done.wait()
+
+    def shutdown(self) -> None:
+        with self._lock:
+            self._shutdown = True
+            self._not_empty.notify_all()
 
 
 def resolve_root(path: str, fs: FileSystem) -> str | ScanError:
@@ -94,7 +146,7 @@ class ThreadedScannerBase(ABC):
             children=[],
         )
 
-        q: queue.Queue[_Task | None] = queue.Queue()
+        q = _WorkQueue()
         q.put(_Task(root_node, 0))
 
         stats = ScanStats(files=0, directories=1, access_errors=0)
@@ -135,7 +187,6 @@ class ThreadedScannerBase(ABC):
                 task = q.get()
                 if task is None:
                     _flush_local()
-                    q.task_done()
                     break
 
                 if _is_cancelled():
@@ -151,8 +202,8 @@ class ThreadedScannerBase(ABC):
 
                     within_depth = options.max_depth is None or task.depth < options.max_depth
                     if within_depth:
-                        for dir_node in dir_children:
-                            q.put(_Task(dir_node, task.depth + 1))
+                        next_depth = task.depth + 1
+                        q.put_many(_Task(n, next_depth) for n in dir_children)
 
                     new_total = local_files + local_dirs
                     if new_total // 100 > prev_total // 100:
@@ -168,9 +219,7 @@ class ThreadedScannerBase(ABC):
         for thread in threads:
             thread.start()
         q.join()
-        for _ in threads:
-            q.put(None)
-        q.join()
+        q.shutdown()
         for thread in threads:
             thread.join(timeout=0.3)
 
