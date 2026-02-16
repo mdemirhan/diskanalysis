@@ -44,8 +44,8 @@ class DisplayRow:
     path: str
     name: str
     size_bytes: int
-    detail: str
     type_label: str = ""
+    category: str | None = None
     disk_usage: int = 0
 
 
@@ -326,7 +326,7 @@ class DuxApp(App[None]):
 
         self.rows = self._build_rows_for_current_view()
         if not self.rows:
-            self.rows = [DisplayRow(path=".", name="(no data)", size_bytes=0, detail="-")]
+            self.rows = [DisplayRow(path=".", name="(no data)", size_bytes=0)]
 
         total = max(
             1,
@@ -339,7 +339,7 @@ class DuxApp(App[None]):
             if self._show_size:
                 cells.append(size_text)
             if is_temp:
-                cells.extend([disk_text, row.type_label, row.detail])
+                cells.extend([disk_text, row.type_label, row.category or ""])
             else:
                 bar_text = relative_bar(row.disk_usage, total, 18) if row.disk_usage > 0 else ""
                 cells.extend([disk_text, bar_text])
@@ -513,47 +513,40 @@ class DuxApp(App[None]):
                 path="",
                 name=f"Total Disk: {format_bytes(self.root.disk_usage)}",
                 size_bytes=self.root.size_bytes,
-                detail="",
                 disk_usage=self.root.disk_usage,
             ),
             DisplayRow(
                 path="",
                 name=f"Files: {self.stats.files:,}",
                 size_bytes=0,
-                detail="",
             ),
             DisplayRow(
                 path="",
                 name=f"Directories: {self.stats.directories:,}",
                 size_bytes=0,
-                detail="",
             ),
             DisplayRow(
                 path="",
                 name=f"Temp: {format_bytes(temp_du)}",
                 size_bytes=temp_sz,
-                detail="",
                 disk_usage=temp_du,
             ),
             DisplayRow(
                 path="",
                 name=f"Cache: {format_bytes(cache_du)}",
                 size_bytes=cache_sz,
-                detail="",
                 disk_usage=cache_du,
             ),
             DisplayRow(
                 path="",
                 name=f"Build Artifacts: {format_bytes(build_du)}",
                 size_bytes=build_sz,
-                detail="",
                 disk_usage=build_du,
             ),
             DisplayRow(
                 path="",
                 name=f"─────── Largest {self._overview_top} directories ───────",
                 size_bytes=0,
-                detail="",
             ),
         ]
 
@@ -565,7 +558,6 @@ class DuxApp(App[None]):
                     path=node.path,
                     name=display_path,
                     size_bytes=node.size_bytes,
-                    detail="",
                     disk_usage=node.disk_usage,
                 )
             )
@@ -587,7 +579,6 @@ class DuxApp(App[None]):
                     path=node.path,
                     name=label,
                     size_bytes=node.size_bytes,
-                    detail="",
                     disk_usage=node.disk_usage,
                 )
             )
@@ -610,7 +601,7 @@ class DuxApp(App[None]):
                     path=item.path,
                     name=display_path,
                     size_bytes=item.size_bytes,
-                    detail=label,
+                    category=label,
                     type_label=type_label,
                     disk_usage=item.disk_usage,
                 )
@@ -626,7 +617,6 @@ class DuxApp(App[None]):
                     path=node.path,
                     name=display_path,
                     size_bytes=node.size_bytes,
-                    detail="",
                     disk_usage=node.disk_usage,
                 )
             )
