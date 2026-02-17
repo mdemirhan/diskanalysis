@@ -235,14 +235,14 @@ class DuxApp(App[None]):
         bundle: InsightBundle,
         config: AppConfig,
         initial_view: str = "overview",
-        show_size: bool = False,
+        apparent_size: bool = False,
     ) -> None:
         super().__init__()
         self.root = root
         self.stats = stats
         self.bundle = bundle
         self.config = config
-        self._show_size = show_size
+        self._apparent_size = apparent_size
         self.current_view = initial_view if initial_view in TABS else "overview"
 
         self._page_size = config.page_size
@@ -339,13 +339,13 @@ class DuxApp(App[None]):
         cat_w = 16
 
         # Each DataTable column adds ~2 chars of cell padding on top of its width.
-        extra = (col_w + 2) if self._show_size else 0
+        extra = (col_w + 2) if self._apparent_size else 0
 
         is_temp = self.current_view == "temp"
         if is_temp:
             name_w = max(20, self.size.width - extra - col_w - type_w - cat_w - 16)
             table.add_column("NAME", width=name_w)
-            if self._show_size:
+            if self._apparent_size:
                 table.add_column("SIZE", width=col_w)
             table.add_column("DISK", width=col_w)
             table.add_column("TYPE", width=type_w)
@@ -353,7 +353,7 @@ class DuxApp(App[None]):
         else:
             name_w = max(20, self.size.width - extra - col_w - bar_w - 12)
             table.add_column("NAME", width=name_w)
-            if self._show_size:
+            if self._apparent_size:
                 table.add_column("SIZE", width=col_w)
             table.add_column("DISK", width=col_w)
             table.add_column("BAR", width=bar_w)
@@ -373,7 +373,7 @@ class DuxApp(App[None]):
             disk_text = format_bytes(row.disk_usage) if row.disk_usage > 0 else ""
             size_text = format_bytes(row.size_bytes) if row.size_bytes > 0 else ""
             cells: list[str] = [row.name]
-            if self._show_size:
+            if self._apparent_size:
                 cells.append(size_text)
             if is_temp:
                 cells.extend([disk_text, row.type_label, row.category or ""])

@@ -20,7 +20,7 @@ def _file(path: str, name: str, du: int = 0) -> ScanNode:
     return ScanNode(path=path, name=name, kind=NodeKind.FILE, size_bytes=du, disk_usage=du, children=LEAF_CHILDREN)
 
 
-def _make_app(show_size: bool = False) -> DuxApp:
+def _make_app(apparent_size: bool = False) -> DuxApp:
     f1 = _file("/r/a.txt", "a.txt", du=100)
     f2 = _file("/r/b.txt", "b.txt", du=200)
     sub_f = _file("/r/sub/c.txt", "c.txt", du=50)
@@ -39,7 +39,7 @@ def _make_app(show_size: bool = False) -> DuxApp:
     }
     bundle = InsightBundle(insights=insights, by_category=by_cat)
     config = AppConfig(page_size=50, max_insights_per_category=100, overview_top_dirs=10, scroll_step=5)
-    return DuxApp(root=root, stats=stats, bundle=bundle, config=config, show_size=show_size)
+    return DuxApp(root=root, stats=stats, bundle=bundle, config=config, apparent_size=apparent_size)
 
 
 @pytest.mark.asyncio
@@ -120,10 +120,10 @@ async def test_help_overlay() -> None:
 
 
 @pytest.mark.asyncio
-async def test_show_size_mode() -> None:
-    app = _make_app(show_size=True)
+async def test_apparent_size_mode() -> None:
+    app = _make_app(apparent_size=True)
     async with app.run_test(size=(120, 40)):
-        assert app._show_size is True
+        assert app._apparent_size is True
         assert len(app.rows) > 0
 
 

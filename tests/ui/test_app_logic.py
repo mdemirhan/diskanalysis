@@ -14,7 +14,7 @@ def _make_app(
     stats: ScanStats | None = None,
     bundle: InsightBundle | None = None,
     config: AppConfig | None = None,
-    show_size: bool = False,
+    apparent_size: bool = False,
 ) -> DuxApp:
     if root is None:
         f1 = make_file("/r/a.txt", du=100)
@@ -34,7 +34,7 @@ def _make_app(
             overview_top_dirs=10,
             scroll_step=5,
         )
-    return DuxApp(root=root, stats=stats, bundle=bundle, config=config, show_size=show_size)
+    return DuxApp(root=root, stats=stats, bundle=bundle, config=config, apparent_size=apparent_size)
 
 
 class TestRelativePath:

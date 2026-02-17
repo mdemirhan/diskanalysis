@@ -6,7 +6,7 @@ Parallel disk usage analyzer for macOS and Linux. Scans directories with multi-t
 
 ## Screenshots
 
-**CLI summary** (`uv run dux ~/src`)
+**CLI summary** (`uv run dux`)
 
 ![CLI summary table](media/summary.png)
 
@@ -43,8 +43,8 @@ uv run dux
 # Analyze a specific path
 uv run dux ~/src
 
-# Include logical file size column
-uv run dux -s ~/src
+# Include apparent (logical) file size column
+uv run dux -A ~/src
 
 # Largest temp/build artifacts
 uv run dux -t ~/src
@@ -54,6 +54,26 @@ uv run dux -c -t ~/src
 
 # Interactive TUI
 uv run dux -i ~/src
+```
+
+### Shell Alias
+
+To call `dux` directly from anywhere, add an alias to your shell config (`~/.bashrc` or `~/.zshrc`):
+
+```bash
+# Using free-threaded Python 3.14t (recommended for best performance)
+alias dux='uv run --python 3.14t --project /path/to/dux dux'
+
+# Or with standard Python
+alias dux='uv run --project /path/to/dux dux'
+```
+
+Replace `/path/to/dux` with the actual clone path. Then:
+
+```bash
+dux ~/src          # CLI summary
+dux -i ~/src       # Interactive TUI
+dux -v ~/src       # Verbose (shows GIL status, scanner, timing)
 ```
 
 ## TUI Views
@@ -109,7 +129,7 @@ By default dux prints a CLI summary table. Use `--interactive` / `-i` to launch 
 | Option | Description |
 |--------|-------------|
 | `--interactive` / `-i` | Launch interactive TUI |
-| `--show-size` / `-s` | Show logical file size column |
+| `--apparent-size` / `-A` | Show apparent size column (logical file size) |
 | `--top-temp` / `-t` | Largest temp/build artifacts |
 | `--top-cache` / `-c` | Largest cache files/directories |
 | `--top-dirs` / `-d` | Largest directories |

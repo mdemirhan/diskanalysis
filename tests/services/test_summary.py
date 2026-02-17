@@ -51,13 +51,13 @@ class TestTrim:
 
 
 class TestAppendSize:
-    def test_show_size_true(self) -> None:
+    def test_apparent_size_true(self) -> None:
         row: list[str] = []
         _append_size(row, 1024, True)
         assert len(row) == 1
         assert "1.0 KB" in row[0]
 
-    def test_show_size_false(self) -> None:
+    def test_apparent_size_false(self) -> None:
         row: list[str] = []
         _append_size(row, 1024, False)
         assert len(row) == 0
@@ -69,13 +69,13 @@ class TestInsightsTable:
 
     def test_basic_table(self) -> None:
         insights = [self._make_insight("/r/a.log", InsightCategory.TEMP)]
-        table = _insights_table("Test", insights, 10, "/r/", show_size=False)
+        table = _insights_table("Test", insights, 10, "/r/", apparent_size=False)
         assert table.title == "Test"
         assert table.row_count == 1
 
-    def test_show_size_adds_column(self) -> None:
+    def test_apparent_size_adds_column(self) -> None:
         insights = [self._make_insight("/r/a.log", InsightCategory.TEMP)]
-        table = _insights_table("Test", insights, 10, "/r/", show_size=True)
+        table = _insights_table("Test", insights, 10, "/r/", apparent_size=True)
         col_names = [c.header for c in table.columns]
         assert any("Size" in str(h) for h in col_names)
 
@@ -99,10 +99,10 @@ class TestTopNodesTable:
         table = _top_nodes_table("Top", root, 10, NodeKind.FILE, "/r/")
         assert table.row_count == 2
 
-    def test_show_size(self) -> None:
+    def test_apparent_size(self) -> None:
         f1 = _file("/r/a", "a", du=100)
         root = _dir("/r", "root", [f1], du=100)
-        table = _top_nodes_table("Top", root, 10, NodeKind.FILE, "/r/", show_size=True)
+        table = _top_nodes_table("Top", root, 10, NodeKind.FILE, "/r/", apparent_size=True)
         col_names = [c.header for c in table.columns]
         assert any("Size" in str(h) for h in col_names)
 
@@ -118,11 +118,11 @@ class TestRenderSummary:
         assert "Top Level Summary" in out
         assert "a.txt" in out
 
-    def test_show_size(self) -> None:
+    def test_apparent_size(self) -> None:
         root = _dir("/r", "root", [], du=0)
         stats = ScanStats()
         c = _console()
-        render_summary(c, root, stats, "/r/", show_size=True)
+        render_summary(c, root, stats, "/r/", apparent_size=True)
         out = _output(c)
         assert "Top Level Summary" in out
 
