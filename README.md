@@ -1,6 +1,6 @@
-# dux
+# dux — a fast, pretty, interactive disk usage analyzer
 
-A fast terminal disk usage analyzer for macOS and Linux. Scans directories in parallel, categorizes files (temp, cache, build artifacts), and presents results as CLI tables or an interactive TUI with vim-style navigation.
+Parallel disk usage analyzer for macOS and Linux. Scans directories with multi-threaded I/O, categorizes files (temp, cache, build artifacts), and presents results as rich CLI tables or an interactive TUI with vim-style navigation.
 
 > **100% AI-written.** The vast majority of this codebase was written by Claude (Anthropic), with contributions from Codex (OpenAI). Human involvement was limited to directing, reviewing, and benchmarking.
 
@@ -168,12 +168,31 @@ Each pattern rule:
 
 ## Performance
 
-Benchmarked on a MacBook Pro M4:
+### Benchmarks
 
-| Files | Dirs | Time  |
-|-------|------|-------|
-| 295k | 38k | ~1.4s |
-| 2.1M | 323k | ~20s  |
+Measured with `hyperfine` (5 runs, 1 warmup) on a MacBook Pro M4 with Python 3.14t (free-threaded), 4 workers:
+
+| Command | `~/src` (295k files, 38k dirs) | `~` (2.1M files, 323k dirs) |
+|---|---|---|
+| `du -sh` | 1.150s | 37.818s |
+| **`dux --scanner macos`** | **0.811s** | **19.784s** |
+| `dux --scanner posix` | 2.429s | 24.417s |
+| `dux --scanner python` | 2.577s | 25.156s |
+
+Relative to the fastest (`dux --scanner macos`):
+
+| Command | `~/src` | `~` |
+|---|---|---|
+| **`dux --scanner macos`** | **1.00x** | **1.00x** |
+| `du -sh` | 1.42x | 1.91x |
+| `dux --scanner posix` | 3.00x | 1.23x |
+| `dux --scanner python` | 3.18x | 1.27x |
+
+The macOS scanner (`getattrlistbulk`) fetches stat info in bulk per directory, avoiding per-file syscalls. Single-threaded `du` falls further behind as the tree grows. The posix and python scanners are close on macOS because `readdir` doesn't bundle stat info (unlike Linux), so both end up doing per-file `lstat` calls.
+
+**Note on the `du` comparison:** `du -sh` only traverses, stats, and sums — dux does all of that plus builds a full in-memory tree, pattern-matches every node against 59 rules (Aho-Corasick + hash lookups), generates categorized insights, and renders Rich output. dux does strictly more work and is still faster with the macOS scanner. The one caveat is that `du` deduplicates hard-linked files by inode while dux does not, though this is negligible on most home directories.
+
+### Scanner Backends
 
 The scanner is I/O-bound. dux ships three scanner backends and automatically selects the best one for your platform:
 
