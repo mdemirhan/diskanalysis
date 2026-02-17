@@ -192,13 +192,17 @@ def run(
     elif scanner == "python":
         scanner_impl = PythonScanner(workers=config.scan_workers)
     elif scanner == "posix":
-        from dux.scan.posix_scanner import PosixScanner
+        from dux._walker import scan_dir_nodes
 
-        scanner_impl = PosixScanner(workers=config.scan_workers)
+        from dux.scan.native_scanner import NativeScanner
+
+        scanner_impl = NativeScanner(scan_dir_nodes, workers=config.scan_workers)
     elif scanner == "macos":
-        from dux.scan.macos_scanner import MacOSScanner
+        from dux._walker import scan_dir_bulk_nodes
 
-        scanner_impl = MacOSScanner(workers=config.scan_workers)
+        from dux.scan.native_scanner import NativeScanner
+
+        scanner_impl = NativeScanner(scan_dir_bulk_nodes, workers=config.scan_workers)
     else:
         console.print(f"[red]Unknown scanner: {scanner}. Use: auto, python, posix, macos.[/]")
         raise typer.Exit(1)

@@ -1,49 +1,19 @@
 from __future__ import annotations
 
 from dux.config.defaults import default_config
-from dux.models.enums import InsightCategory, NodeKind
+from dux.models.enums import InsightCategory
 from dux.models.scan import ScanNode
 from dux.services.insights import generate_insights
+from tests.factories import make_dir, make_file
 
 
 def _tree_with(*children: ScanNode) -> ScanNode:
-    total = sum(child.size_bytes for child in children)
-    disk_total = sum(child.disk_usage for child in children)
-    return ScanNode(
-        path="/root",
-        name="root",
-        kind=NodeKind.DIRECTORY,
-        size_bytes=total,
-        disk_usage=disk_total,
-        children=list(children),
-    )
-
-
-def _file(path: str, size: int) -> ScanNode:
-    return ScanNode(
-        path=path,
-        name=path.rsplit("/", 1)[-1],
-        kind=NodeKind.FILE,
-        size_bytes=size,
-        disk_usage=size,
-        children=[],
-    )
-
-
-def _dir(path: str, size: int, *children: ScanNode) -> ScanNode:
-    return ScanNode(
-        path=path,
-        name=path.rsplit("/", 1)[-1],
-        kind=NodeKind.DIRECTORY,
-        size_bytes=size,
-        disk_usage=size,
-        children=list(children),
-    )
+    return make_dir("/root", du=0, children=list(children))
 
 
 def test_temp_analyzer_path_matching_and_threshold_logic() -> None:
     config = default_config()
-    node = _file("/root/tmp/trace.log", size=2 * 1024 * 1024)
+    node = make_file("/root/tmp/trace.log", du=2 * 1024 * 1024)
     bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.TEMP for item in bundle.insights)
@@ -51,7 +21,7 @@ def test_temp_analyzer_path_matching_and_threshold_logic() -> None:
 
 def test_cache_analyzer_path_matching_and_threshold_logic() -> None:
     config = default_config()
-    node = _dir("/root/.cache/pip", size=3 * 1024 * 1024)
+    node = make_dir("/root/.cache/pip", du=3 * 1024 * 1024)
     bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.CACHE for item in bundle.insights)
@@ -59,10 +29,10 @@ def test_cache_analyzer_path_matching_and_threshold_logic() -> None:
 
 def test_build_artifact_detection() -> None:
     config = default_config()
-    node = _dir(
+    node = make_dir(
         "/root/project/node_modules",
-        2 * 1024 * 1024,
-        _file("/root/project/node_modules/a.js", 100),
+        du=2 * 1024 * 1024,
+        children=[make_file("/root/project/node_modules/a.js", du=100)],
     )
     bundle = generate_insights(_tree_with(node), config)
 
@@ -71,7 +41,7 @@ def test_build_artifact_detection() -> None:
 
 def test_dedup_by_path() -> None:
     config = default_config()
-    node = _dir("/root/__pycache__", size=100)
+    node = make_dir("/root/__pycache__", du=100)
     bundle = generate_insights(_tree_with(node), config)
 
     matched = [item for item in bundle.insights if item.path == "/root/__pycache__"]
@@ -80,8 +50,8 @@ def test_dedup_by_path() -> None:
 
 def test_temp_and_cache_insights_generated() -> None:
     config = default_config()
-    temp = _dir("/root/tmp/cache", size=100)
-    cache = _dir("/root/.cache/pip", size=200)
+    temp = make_dir("/root/tmp/cache", du=100)
+    cache = make_dir("/root/.cache/pip", du=200)
     bundle = generate_insights(_tree_with(temp, cache), config)
 
     categories = {item.category for item in bundle.insights}
@@ -90,31 +60,27 @@ def test_temp_and_cache_insights_generated() -> None:
 
 
 def test_case_insensitive_matching() -> None:
-    """Pattern matching should be case-insensitive (e.g. .DS_STORE matches .DS_Store rule)."""
     config = default_config()
-    # Mixed-case path that should match the lowercase ".ds_store" pattern
-    node = _file("/root/project/.DS_STORE", size=4096)
+    node = make_file("/root/project/.DS_STORE", du=4096)
     bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.TEMP for item in bundle.insights)
 
 
 def test_case_insensitive_extension_matching() -> None:
-    """File extensions like .LOG should match *.log rules."""
     config = default_config()
-    node = _file("/root/app/debug.LOG", size=1024)
+    node = make_file("/root/app/debug.LOG", du=1024)
     bundle = generate_insights(_tree_with(node), config)
 
     assert any(item.category is InsightCategory.TEMP for item in bundle.insights)
 
 
 def test_case_insensitive_directory_matching() -> None:
-    """Directory names like Node_Modules should match node_modules rule."""
     config = default_config()
-    node = _dir(
+    node = make_dir(
         "/root/project/Node_Modules",
-        2 * 1024 * 1024,
-        _file("/root/project/Node_Modules/a.js", 100),
+        du=2 * 1024 * 1024,
+        children=[make_file("/root/project/Node_Modules/a.js", du=100)],
     )
     bundle = generate_insights(_tree_with(node), config)
 

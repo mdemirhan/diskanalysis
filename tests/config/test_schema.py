@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dux.config.schema import AppConfig, PatternRule, _parse_apply_to, _rule_from_dict, _rule_to_dict, from_dict
+from dux.config.schema import AppConfig, PatternRule
 from dux.models.enums import ApplyTo, InsightCategory
 
 
@@ -9,8 +9,7 @@ class TestToDict:
         cfg = AppConfig()
         d = cfg.to_dict()
         expected_keys = {
-            "additionalTempPaths",
-            "additionalCachePaths",
+            "additionalPaths",
             "maxDepth",
             "scanWorkers",
             "topCount",
@@ -18,9 +17,7 @@ class TestToDict:
             "maxInsightsPerCategory",
             "overviewTopDirs",
             "scrollStep",
-            "tempPatterns",
-            "cachePatterns",
-            "buildArtifactPatterns",
+            "patterns",
         }
         assert set(d.keys()) == expected_keys
 
@@ -42,7 +39,7 @@ class TestRuleToDict:
             apply_to=ApplyTo.FILE,
             stop_recursion=True,
         )
-        d = _rule_to_dict(rule)
+        d = rule.to_dict()
         assert d["name"] == "test"
         assert d["pattern"] == "**/*.log"
         assert d["category"] == "temp"
@@ -51,28 +48,28 @@ class TestRuleToDict:
 
     def test_apply_to_both(self) -> None:
         rule = PatternRule("r", "p", InsightCategory.CACHE, apply_to=ApplyTo.BOTH)
-        assert _rule_to_dict(rule)["applyTo"] == "both"
+        assert rule.to_dict()["applyTo"] == "both"
 
     def test_apply_to_dir(self) -> None:
         rule = PatternRule("r", "p", InsightCategory.CACHE, apply_to=ApplyTo.DIR)
-        assert _rule_to_dict(rule)["applyTo"] == "dir"
+        assert rule.to_dict()["applyTo"] == "dir"
 
 
-class TestParseApplyTo:
+class TestApplyToFromStr:
     def test_file(self) -> None:
-        assert _parse_apply_to("file") == ApplyTo.FILE
+        assert ApplyTo.from_str("file") == ApplyTo.FILE
 
     def test_dir(self) -> None:
-        assert _parse_apply_to("dir") == ApplyTo.DIR
+        assert ApplyTo.from_str("dir") == ApplyTo.DIR
 
     def test_both(self) -> None:
-        assert _parse_apply_to("both") == ApplyTo.BOTH
+        assert ApplyTo.from_str("both") == ApplyTo.BOTH
 
     def test_unknown_fallback(self) -> None:
-        assert _parse_apply_to("unknown") == ApplyTo.BOTH
+        assert ApplyTo.from_str("unknown") == ApplyTo.BOTH
 
     def test_non_string_fallback(self) -> None:
-        assert _parse_apply_to(42) == ApplyTo.BOTH
+        assert ApplyTo.from_str(42) == ApplyTo.BOTH
 
 
 class TestRuleFromDict:
@@ -84,7 +81,7 @@ class TestRuleFromDict:
             "applyTo": "file",
             "stopRecursion": True,
         }
-        rule = _rule_from_dict(payload)
+        rule = PatternRule.from_dict(payload)
         assert rule.name == "test"
         assert rule.pattern == "**/*.log"
         assert rule.category is InsightCategory.TEMP
@@ -93,7 +90,7 @@ class TestRuleFromDict:
 
     def test_without_optional_keys(self) -> None:
         payload = {"name": "test", "pattern": "**/*.log", "category": "cache"}
-        rule = _rule_from_dict(payload)
+        rule = PatternRule.from_dict(payload)
         assert rule.apply_to == ApplyTo.BOTH
         assert rule.stop_recursion is False
 
@@ -101,54 +98,51 @@ class TestRuleFromDict:
 class TestFromDict:
     def test_max_depth_none(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"maxDepth": None}, defaults)
+        result = AppConfig.from_dict({"maxDepth": None}, defaults)
         assert result.max_depth is None
 
     def test_max_depth_present(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"maxDepth": 3}, defaults)
+        result = AppConfig.from_dict({"maxDepth": 3}, defaults)
         assert result.max_depth == 3
 
     def test_numeric_clamping_scan_workers(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"scanWorkers": 0}, defaults)
+        result = AppConfig.from_dict({"scanWorkers": 0}, defaults)
         assert result.scan_workers == 1
 
     def test_numeric_clamping_page_size(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"pageSize": 1}, defaults)
+        result = AppConfig.from_dict({"pageSize": 1}, defaults)
         assert result.page_size == 10
 
     def test_numeric_clamping_max_insights(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"maxInsightsPerCategory": 1}, defaults)
+        result = AppConfig.from_dict({"maxInsightsPerCategory": 1}, defaults)
         assert result.max_insights_per_category == 10
 
     def test_numeric_clamping_overview_top_dirs(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"overviewTopDirs": 1}, defaults)
+        result = AppConfig.from_dict({"overviewTopDirs": 1}, defaults)
         assert result.overview_top_dirs == 5
 
     def test_numeric_clamping_scroll_step(self) -> None:
         defaults = AppConfig()
-        result = from_dict({"scrollStep": 0}, defaults)
+        result = AppConfig.from_dict({"scrollStep": 0}, defaults)
         assert result.scroll_step == 1
 
-    def test_pattern_keys_present(self) -> None:
+    def test_patterns_present(self) -> None:
         payload = {
-            "tempPatterns": [{"name": "t", "pattern": "**/t", "category": "temp"}],
-            "cachePatterns": [],
-            "buildArtifactPatterns": [],
+            "patterns": [{"name": "t", "pattern": "**/t", "category": "temp"}],
         }
-        result = from_dict(payload, AppConfig())
-        assert len(result.temp_patterns) == 1
-        assert result.temp_patterns[0].name == "t"
-        assert len(result.cache_patterns) == 0
+        result = AppConfig.from_dict(payload, AppConfig())
+        assert len(result.patterns) == 1
+        assert result.patterns[0].name == "t"
 
-    def test_pattern_keys_absent_uses_defaults(self) -> None:
+    def test_patterns_absent_uses_defaults(self) -> None:
         defaults = AppConfig(
-            temp_patterns=[PatternRule("d", "**/*.d", InsightCategory.TEMP)],
+            patterns=[PatternRule("d", "**/*.d", InsightCategory.TEMP)],
         )
-        result = from_dict({}, defaults)
-        assert len(result.temp_patterns) == 1
-        assert result.temp_patterns[0].name == "d"
+        result = AppConfig.from_dict({}, defaults)
+        assert len(result.patterns) == 1
+        assert result.patterns[0].name == "d"

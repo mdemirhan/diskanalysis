@@ -27,7 +27,7 @@ class TestLoadConfig:
         raw = sample_config_json()
         parsed = json.loads(raw)
         assert isinstance(parsed, dict)
-        assert "tempPatterns" in parsed
+        assert "patterns" in parsed
 
     def test_custom_path(self) -> None:
         fs = MemoryFileSystem()

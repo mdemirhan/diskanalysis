@@ -8,7 +8,19 @@ import pytest
 from result import Ok
 
 from dux.models.scan import ScanOptions
-from dux.scan.posix_scanner import PosixScanner
+from dux.scan.native_scanner import NativeScanner
+
+
+def _posix_scanner(workers: int = 4) -> NativeScanner:
+    from dux._walker import scan_dir_nodes
+
+    return NativeScanner(scan_dir_nodes, workers=workers)
+
+
+def _macos_scanner(workers: int = 4) -> NativeScanner:
+    from dux._walker import scan_dir_bulk_nodes
+
+    return NativeScanner(scan_dir_bulk_nodes, workers=workers)
 
 
 def test_posix_scanner_basic() -> None:
@@ -19,8 +31,7 @@ def test_posix_scanner_basic() -> None:
         with open(os.path.join(tmpdir, "sub", "b.txt"), "wb") as f:
             f.write(b"y" * 200)
 
-        scanner = PosixScanner(workers=4)
-        result = scanner.scan(tmpdir, ScanOptions())
+        result = _posix_scanner().scan(tmpdir, ScanOptions())
 
         assert isinstance(result, Ok)
         snapshot = result.unwrap()
@@ -36,8 +47,7 @@ def test_posix_scanner_max_depth() -> None:
         with open(os.path.join(tmpdir, "lvl1", "lvl2", "deep.txt"), "wb") as f:
             f.write(b"z" * 50)
 
-        scanner = PosixScanner(workers=4)
-        result = scanner.scan(tmpdir, ScanOptions(max_depth=0))
+        result = _posix_scanner().scan(tmpdir, ScanOptions(max_depth=0))
 
         assert isinstance(result, Ok)
         snapshot = result.unwrap()
@@ -47,8 +57,6 @@ def test_posix_scanner_max_depth() -> None:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_macos_scanner_basic() -> None:
-    from dux.scan.macos_scanner import MacOSScanner
-
     with tempfile.TemporaryDirectory() as tmpdir:
         os.makedirs(os.path.join(tmpdir, "sub"))
         with open(os.path.join(tmpdir, "a.txt"), "wb") as f:
@@ -56,8 +64,7 @@ def test_macos_scanner_basic() -> None:
         with open(os.path.join(tmpdir, "sub", "b.txt"), "wb") as f:
             f.write(b"y" * 200)
 
-        scanner = MacOSScanner(workers=4)
-        result = scanner.scan(tmpdir, ScanOptions())
+        result = _macos_scanner().scan(tmpdir, ScanOptions())
 
         assert isinstance(result, Ok)
         snapshot = result.unwrap()
@@ -69,15 +76,12 @@ def test_macos_scanner_basic() -> None:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
 def test_macos_scanner_max_depth() -> None:
-    from dux.scan.macos_scanner import MacOSScanner
-
     with tempfile.TemporaryDirectory() as tmpdir:
         os.makedirs(os.path.join(tmpdir, "lvl1", "lvl2"))
         with open(os.path.join(tmpdir, "lvl1", "lvl2", "deep.txt"), "wb") as f:
             f.write(b"z" * 50)
 
-        scanner = MacOSScanner(workers=4)
-        result = scanner.scan(tmpdir, ScanOptions(max_depth=0))
+        result = _macos_scanner().scan(tmpdir, ScanOptions(max_depth=0))
 
         assert isinstance(result, Ok)
         snapshot = result.unwrap()

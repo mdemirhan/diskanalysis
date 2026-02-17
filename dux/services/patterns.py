@@ -189,6 +189,38 @@ class _ByKind:
 
 
 @dataclass(slots=True)
+class _ByKindBuilder:
+    """Accumulates pattern entries for one node kind during compilation."""
+
+    exact: dict[str, list[PatternRule]] = field(default_factory=dict)
+    ac_entries: list[tuple[str, str, PatternRule]] = field(default_factory=list)
+    startswith: list[tuple[str, PatternRule]] = field(default_factory=list)
+    glob: list[tuple[str, PatternRule]] = field(default_factory=list)
+    additional: list[tuple[str, PatternRule]] = field(default_factory=list)
+
+    def add(self, m: _Matcher, rule: PatternRule) -> None:
+        if m.kind == _EXACT:
+            self.exact.setdefault(m.value, []).append(rule)
+        elif m.kind == _CONTAINS:
+            self.ac_entries.append((m.value, m.alt, rule))
+        elif m.kind == _ENDSWITH:
+            self.ac_entries.append(("", m.value, rule))
+        elif m.kind == _STARTSWITH:
+            self.startswith.append((m.value, rule))
+        else:
+            self.glob.append((m.value, rule))
+
+    def build(self) -> _ByKind:
+        return _ByKind(
+            exact=self.exact,
+            ac=_build_ac(self.ac_entries),
+            startswith=self.startswith,
+            glob=self.glob,
+            additional=self.additional,
+        )
+
+
+@dataclass(slots=True)
 class CompiledRuleSet:
     """All pattern rules from all categories, split by file/dir at compile time."""
 
@@ -197,89 +229,36 @@ class CompiledRuleSet:
 
 
 def compile_ruleset(
-    category_rules: list[list[PatternRule]],
+    rules: list[PatternRule],
     additional_paths: list[tuple[str, PatternRule]] | None = None,
 ) -> CompiledRuleSet:
-    """Build a single CompiledRuleSet from all categories.
+    """Build a single CompiledRuleSet from all rules.
 
-    *category_rules* is a list of rule-lists. Each rule already carries its own
-    category.  Rules with ``apply_to=BOTH`` are merged into both file and dir
-    collections at compile time so the hot loop never branches on apply_to.
+    Each rule already carries its own category. Rules with ``apply_to=BOTH``
+    are merged into both file and dir collections at compile time so the hot
+    loop never branches on apply_to.
 
     *additional_paths* are pre-normalized (base_path, rule) pairs.
     """
-    # Collect CONTAINS entries locally; they become automata at the end.
-    ac_file: list[tuple[str, str, PatternRule]] = []
-    ac_dir: list[tuple[str, str, PatternRule]] = []
+    builders = {_FILE: _ByKindBuilder(), _DIR: _ByKindBuilder()}
 
-    exact_file: dict[str, list[PatternRule]] = {}
-    exact_dir: dict[str, list[PatternRule]] = {}
-    startswith_file: list[tuple[str, PatternRule]] = []
-    startswith_dir: list[tuple[str, PatternRule]] = []
-    glob_file: list[tuple[str, PatternRule]] = []
-    glob_dir: list[tuple[str, PatternRule]] = []
+    for rule in rules:
+        at = rule.apply_to
+        for expanded_pat in _expand_braces(rule.pattern):
+            m = _classify(expanded_pat)
+            for flag, b in builders.items():
+                if at & flag:
+                    b.add(m, rule)
 
-    for rules in category_rules:
-        for rule in rules:
-            at = rule.apply_to
-
-            for expanded_pat in _expand_braces(rule.pattern):
-                m = _classify(expanded_pat)
-
-                if m.kind == _CONTAINS:
-                    entry = (m.value, m.alt, rule)
-                    if at & _FILE:
-                        ac_file.append(entry)
-                    if at & _DIR:
-                        ac_dir.append(entry)
-                elif m.kind == _EXACT:
-                    if at & _FILE:
-                        exact_file.setdefault(m.value, []).append(rule)
-                    if at & _DIR:
-                        exact_dir.setdefault(m.value, []).append(rule)
-                elif m.kind == _ENDSWITH:
-                    entry = ("", m.value, rule)
-                    if at & _FILE:
-                        ac_file.append(entry)
-                    if at & _DIR:
-                        ac_dir.append(entry)
-                elif m.kind == _STARTSWITH:
-                    pair = (m.value, rule)
-                    if at & _FILE:
-                        startswith_file.append(pair)
-                    if at & _DIR:
-                        startswith_dir.append(pair)
-                else:  # _GLOB
-                    pair = (m.value, rule)
-                    if at & _FILE:
-                        glob_file.append(pair)
-                    if at & _DIR:
-                        glob_dir.append(pair)
-
-    additional_file: list[tuple[str, PatternRule]] = []
-    additional_dir: list[tuple[str, PatternRule]] = []
     if additional_paths:
         for base, rule in additional_paths:
-            if rule.apply_to & _FILE:
-                additional_file.append((base, rule))
-            if rule.apply_to & _DIR:
-                additional_dir.append((base, rule))
+            for flag, b in builders.items():
+                if rule.apply_to & flag:
+                    b.additional.append((base, rule))
 
     return CompiledRuleSet(
-        for_file=_ByKind(
-            exact=exact_file,
-            ac=_build_ac(ac_file),
-            startswith=startswith_file,
-            glob=glob_file,
-            additional=additional_file,
-        ),
-        for_dir=_ByKind(
-            exact=exact_dir,
-            ac=_build_ac(ac_dir),
-            startswith=startswith_dir,
-            glob=glob_dir,
-            additional=additional_dir,
-        ),
+        for_file=builders[_FILE].build(),
+        for_dir=builders[_DIR].build(),
     )
 
 

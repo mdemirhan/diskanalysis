@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import override
 
-from dux.models.enums import NodeKind
 from dux.models.scan import ScanErrorCode, ScanNode, ScanOptions
-from dux.scan._base import ThreadedScannerBase, resolve_root
-from dux.services.tree import LEAF_CHILDREN
+from dux.scan._base import resolve_root
+from dux.scan.python_scanner import PythonScanner
 from tests.fs_mock import MemoryFileSystem
 
 
@@ -37,8 +36,8 @@ class TestResolveRoot:
         assert result == "/root"
 
 
-class _TestableScanner(ThreadedScannerBase):
-    """Minimal subclass for testing base class behavior."""
+class _TestableScanner(PythonScanner):
+    """Minimal subclass for testing base class error handling."""
 
     def __init__(self, fs: MemoryFileSystem, fail_on: str | None = None) -> None:
         super().__init__(workers=1, fs=fs)
@@ -48,39 +47,7 @@ class _TestableScanner(ThreadedScannerBase):
     def _scan_dir(self, parent: ScanNode, path: str) -> tuple[list[ScanNode], int, int, int]:
         if self._fail_on and path == self._fail_on:
             raise OSError("Simulated failure")
-        dir_children: list[ScanNode] = []
-        errors = 0
-        files = 0
-        dirs = 0
-        for entry in self._fs.scandir(path):
-            st = entry.stat
-            if st is None:
-                errors += 1
-                continue
-            if st.is_dir:
-                node = ScanNode(
-                    path=entry.path,
-                    name=entry.name,
-                    kind=NodeKind.DIRECTORY,
-                    size_bytes=0,
-                    disk_usage=0,
-                    children=[],
-                )
-                parent.children.append(node)
-                dir_children.append(node)
-                dirs += 1
-            else:
-                node = ScanNode(
-                    path=entry.path,
-                    name=entry.name,
-                    kind=NodeKind.FILE,
-                    size_bytes=st.size,
-                    disk_usage=st.disk_usage,
-                    children=LEAF_CHILDREN,
-                )
-                parent.children.append(node)
-                files += 1
-        return dir_children, files, dirs, errors
+        return super()._scan_dir(parent, path)
 
 
 class TestScanDirError:

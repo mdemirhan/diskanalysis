@@ -39,10 +39,7 @@ def _heap_push(
 def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
     # --- build additional path rules ---
     additional_paths: list[tuple[str, PatternRule]] = []
-    for category, sources in (
-        (InsightCategory.TEMP, config.additional_temp_paths),
-        (InsightCategory.CACHE, config.additional_cache_paths),
-    ):
+    for category, sources in config.additional_paths.items():
         for raw_base in sources:
             base = str(Path(raw_base).expanduser()).rstrip("/")
             additional_paths.append(
@@ -60,11 +57,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
 
     # --- compile all rules into a single dispatch structure ---
     ruleset: CompiledRuleSet = compile_ruleset(
-        [
-            config.temp_patterns,
-            config.cache_patterns,
-            config.build_artifact_patterns,
-        ],
+        config.patterns,
         additional_paths=additional_paths or None,
     )
 

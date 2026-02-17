@@ -5,7 +5,7 @@ import json
 from result import Err, Ok, Result
 
 from dux.config.defaults import default_config
-from dux.config.schema import AppConfig, from_dict
+from dux.config.schema import AppConfig
 from dux.services.fs import DEFAULT_FS, FileSystem
 
 CONFIG_PATH = "~/.config/dux/config.json"
@@ -20,7 +20,7 @@ def load_config(path: str | None = None, fs: FileSystem = DEFAULT_FS) -> Result[
         payload = json.loads(fs.read_text(resolved))
         if not isinstance(payload, dict):
             return Err(f"Config at {resolved} must be a JSON object.")
-        return Ok(from_dict(payload, default_config()))
+        return Ok(AppConfig.from_dict(payload, default_config()))
     except Exception as exc:  # noqa: BLE001
         return Err(f"Failed reading config at {resolved}: {exc}.")
 

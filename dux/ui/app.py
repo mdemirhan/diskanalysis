@@ -32,12 +32,6 @@ _TAB_LABELS: dict[str, str] = {
     "large_file": "Files by Size",
 }
 
-_CATEGORY_LABELS: dict[str, str] = {
-    "temp": "Temp",
-    "cache": "Cache",
-    "build_artifact": "Build Artifact",
-}
-
 
 @dataclass(slots=True)
 class DisplayRow:
@@ -610,7 +604,7 @@ class DuxApp(App[None]):
             if not predicate(item):
                 continue
             display_path = self._relative_path(item.path)
-            label = _CATEGORY_LABELS.get(item.category.value, item.category.value)
+            label = item.category.label
             node = self.node_by_path.get(item.path)
             type_label = "Dir" if node is not None and node.is_dir else "File"
             rows.append(

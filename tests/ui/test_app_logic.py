@@ -4,18 +4,9 @@ from dux.config.schema import AppConfig
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import CategoryStats, Insight, InsightBundle
 from dux.models.scan import ScanNode, ScanStats
-from dux.services.tree import LEAF_CHILDREN, finalize_sizes
+from dux.services.tree import finalize_sizes
 from dux.ui.app import DuxApp, _PagedState
-
-
-def _dir(path: str, name: str, children: list[ScanNode] | None = None, du: int = 0) -> ScanNode:
-    return ScanNode(
-        path=path, name=name, kind=NodeKind.DIRECTORY, size_bytes=du, disk_usage=du, children=children or []
-    )
-
-
-def _file(path: str, name: str, du: int = 0) -> ScanNode:
-    return ScanNode(path=path, name=name, kind=NodeKind.FILE, size_bytes=du, disk_usage=du, children=LEAF_CHILDREN)
+from tests.factories import make_dir, make_file
 
 
 def _make_app(
@@ -26,11 +17,11 @@ def _make_app(
     show_size: bool = False,
 ) -> DuxApp:
     if root is None:
-        f1 = _file("/r/a.txt", "a.txt", du=100)
-        f2 = _file("/r/b.txt", "b.txt", du=200)
-        sub_f = _file("/r/sub/c.txt", "c.txt", du=50)
-        sub = _dir("/r/sub", "sub", [sub_f], du=50)
-        root = _dir("/r", "root", [f1, f2, sub], du=350)
+        f1 = make_file("/r/a.txt", du=100)
+        f2 = make_file("/r/b.txt", du=200)
+        sub_f = make_file("/r/sub/c.txt", du=50)
+        sub = make_dir("/r/sub", du=50, children=[sub_f])
+        root = make_dir("/r", du=350, children=[f1, f2, sub])
         finalize_sizes(root)
     if stats is None:
         stats = ScanStats(files=3, directories=2)
@@ -76,30 +67,26 @@ class TestOverviewRows:
         app = _make_app()
         rows = app._overview_rows()
         names = [r.name for r in rows]
-        # Should have total, files count, dirs count, temp/cache/build, separator, then top dirs
         assert any("Total" in n for n in names)
         assert any("Files" in n for n in names)
         assert any("Directories" in n for n in names)
-        # Should have top directory entries
         assert len(rows) > 7
 
 
 class TestBrowseRows:
     def test_collapsed_shows_root_only(self) -> None:
-        f = _file("/r/a.txt", "a.txt", du=10)
-        sub = _dir("/r/sub", "sub", [], du=5)
-        root = _dir("/r", "root", [f, sub], du=15)
+        f = make_file("/r/a.txt", du=10)
+        sub = make_dir("/r/sub", du=5)
+        root = make_dir("/r", du=15, children=[f, sub])
         finalize_sizes(root)
         app = _make_app(root=root)
-        # Root is expanded by default, but children are collapsed
         rows = app._browse_rows()
-        # Root + its children visible
         assert len(rows) >= 2
 
     def test_expanded_shows_children(self) -> None:
-        f = _file("/r/sub/a.txt", "a.txt", du=10)
-        sub = _dir("/r/sub", "sub", [f], du=10)
-        root = _dir("/r", "root", [sub], du=10)
+        f = make_file("/r/sub/a.txt", du=10)
+        sub = make_dir("/r/sub", du=10, children=[f])
+        root = make_dir("/r", du=10, children=[sub])
         finalize_sizes(root)
         app = _make_app(root=root)
         app.expanded.add("/r/sub")
@@ -108,8 +95,8 @@ class TestBrowseRows:
         assert "/r/sub/a.txt" in paths
 
     def test_directory_markers(self) -> None:
-        sub = _dir("/r/sub", "sub", [], du=5)
-        root = _dir("/r", "root", [sub], du=5)
+        sub = make_dir("/r/sub", du=5)
+        root = make_dir("/r", du=5, children=[sub])
         finalize_sizes(root)
         app = _make_app(root=root)
         rows = app._browse_rows()
@@ -165,9 +152,7 @@ class TestFilteredRows:
     def test_cache_hit(self) -> None:
         app = _make_app()
         rows = app._overview_rows()
-        # First call populates cache
         _ = app._filtered_rows("overview", rows)
-        # Second call should use cache (same source_rows identity)
         result = app._filtered_rows("overview", rows)
         assert result is app._views["overview"].filtered_cache.rows  # type: ignore[union-attr]
 
@@ -176,7 +161,7 @@ class TestInvalidateRows:
     def test_clears_caches(self) -> None:
         app = _make_app()
         vs = app._views["overview"]
-        vs.rows_cache = [_file("/r/x", "x")]  # type: ignore[list-item]
+        vs.rows_cache = [make_file("/r/x")]  # type: ignore[list-item]
         app._invalidate_rows("overview")
         assert vs.rows_cache is None
         assert vs.filtered_cache is None
@@ -207,7 +192,7 @@ class TestBuildAllPagedRows:
         app = _make_app(bundle=bundle)
         rows, total = app._build_all_paged_rows("temp")
         assert len(rows) == 3
-        assert total == 3  # all unique paths in TEMP_CATEGORIES
+        assert total == 3
 
     def test_large_dir_view(self) -> None:
         app = _make_app()
@@ -227,14 +212,13 @@ class TestTrimmedIndicator:
 
     def test_no_rows_returns_empty(self) -> None:
         app = _make_app()
-        # temp is paged but all_rows is None
         assert app._trimmed_indicator("temp") == ""
 
     def test_with_filter(self) -> None:
         app = _make_app()
         vs = app._views["temp"]
         assert vs.paged is not None
-        vs.paged.all_rows = [_file("/r/x", "x")]  # type: ignore[list-item]
+        vs.paged.all_rows = [make_file("/r/x")]  # type: ignore[list-item]
         vs.paged.total_items = 5
         vs.filter_text = "x"
         result = app._trimmed_indicator("temp")
@@ -244,7 +228,7 @@ class TestTrimmedIndicator:
         app = _make_app()
         vs = app._views["temp"]
         assert vs.paged is not None
-        vs.paged.all_rows = [_file("/r/x", "x")]  # type: ignore[list-item]
+        vs.paged.all_rows = [make_file("/r/x")]  # type: ignore[list-item]
         vs.paged.total_items = 100
         result = app._trimmed_indicator("temp")
         assert "of" in result
@@ -254,7 +238,7 @@ class TestTrimmedIndicator:
         app = _make_app()
         vs = app._views["temp"]
         assert vs.paged is not None
-        rows_list = [_file(f"/r/{i}", f"{i}") for i in range(5)]  # type: ignore[list-item]
+        rows_list = [make_file(f"/r/{i}") for i in range(5)]  # type: ignore[list-item]
         vs.paged.all_rows = rows_list  # type: ignore[assignment]
         vs.paged.total_items = 5
         result = app._trimmed_indicator("temp")
@@ -271,8 +255,7 @@ class TestFilteredPageCount:
     def test_page_count(self) -> None:
         app = _make_app()
         state = _PagedState()
-        state.all_rows = [_file(f"/r/{i}", f"{i}") for i in range(250)]  # type: ignore[list-item]
-        # page_size is 50
+        state.all_rows = [make_file(f"/r/{i}") for i in range(250)]  # type: ignore[list-item]
         count = app._filtered_page_count("temp", state)
         assert count == 5
 

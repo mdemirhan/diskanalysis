@@ -11,7 +11,7 @@ def test_load_config_missing_uses_defaults() -> None:
     result = load_config(path="/missing.json", fs=fs)
     assert isinstance(result, Ok)
     cfg = result.unwrap()
-    assert cfg.temp_patterns
+    assert cfg.patterns
 
 
 def test_load_config_invalid_returns_warning() -> None:
