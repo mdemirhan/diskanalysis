@@ -18,7 +18,7 @@ class Scanner(Protocol):
     ) -> ScanResult: ...
 
 
-def default_scanner(workers: int = 8) -> ThreadedScannerBase:
+def default_scanner(workers: int = 4) -> ThreadedScannerBase:
     """Return the best available scanner for the current platform.
 
     macOS → NativeScanner (getattrlistbulk).

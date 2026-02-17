@@ -156,7 +156,7 @@ class ThreadedScannerBase(ABC):
     reporting, cancellation, and tree finalization.
     """
 
-    def __init__(self, workers: int = 8, fs: FileSystem = DEFAULT_FS) -> None:
+    def __init__(self, workers: int = 4, fs: FileSystem = DEFAULT_FS) -> None:
         self._workers = max(1, workers)
         self._fs = fs
 

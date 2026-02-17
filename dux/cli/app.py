@@ -221,7 +221,7 @@ def run(
 
     if verbose:
         gil_status = "enabled" if sys._is_gil_enabled() else "disabled"  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001
-        scanner_name = type(scanner_impl).__name__
+        scanner_name = getattr(scanner_impl, "label", type(scanner_impl).__name__)
         console.print(f"[#969896]GIL: {gil_status} | Scanner: {scanner_name} | Workers: {config.scan_workers}[/]")
 
     t0 = time.perf_counter()
