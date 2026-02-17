@@ -17,13 +17,17 @@
  *   ac.iter(text: str) -> list[tuple[int, object]]
  */
 
-#define AC_ALPHA 256  /* full byte range for UTF-8 safety */
+/* Full byte range: 256 children per node (1 KB each).  This trades memory
+ * for speed — constant-time transitions in the hot loop.  Acceptable because
+ * patterns are short, so the trie has few nodes. */
+#define AC_ALPHA 256
 
 typedef struct {
     int children[AC_ALPHA];
-    int fail;
+    int fail;         /* failure link: longest proper suffix that is also a prefix in the trie */
     int output;       /* index into values[], -1 = none */
-    int dict_suffix;  /* nearest ancestor with output via fail chain */
+    int dict_suffix;  /* "output link": shortcuts the fail chain to the nearest
+                         state with output, avoiding a linear walk per character */
 } ACNode;
 
 typedef struct {
@@ -53,7 +57,8 @@ ac_new_node(AhoCorasickObject *self)
         self->cap_nodes = new_cap;
     }
     ACNode *nd = &self->nodes[self->n_nodes];
-    memset(nd->children, 0xff, sizeof(nd->children));  /* fill with -1 */
+    /* 0xFF bytes → -1 in two's complement for 32-bit ints (all modern platforms). */
+    memset(nd->children, 0xff, sizeof(nd->children));
     nd->fail = 0;
     nd->output = -1;
     nd->dict_suffix = -1;
@@ -196,14 +201,21 @@ AhoCorasick_make_automaton(AhoCorasickObject *self, PyObject *Py_UNUSED(ignored)
         }
     }
 
-    /* BFS */
+    /* BFS to compute fail and dict_suffix links (standard Aho-Corasick).
+     * For each node v reached by edge c from parent u:
+     *   fail(v) = longest proper suffix of the string reaching v that
+     *             is also a prefix in the trie.  Found by walking up
+     *             fail(u) until a node with a c-transition is found.
+     *   dict_suffix(v) = nearest node reachable via fail chain that
+     *             has an output, or -1.  Precomputed here to avoid
+     *             linear walks during matching. */
     while (head < tail) {
         int u = queue[head++];
         for (int c = 0; c < AC_ALPHA; c++) {
             int v = nodes[u].children[c];
             if (v < 0) continue;
 
-            /* Compute fail link */
+            /* Walk up the fail chain from parent until we can take edge c */
             int f = nodes[u].fail;
             while (f > 0 && nodes[f].children[c] < 0)
                 f = nodes[f].fail;
@@ -325,6 +337,10 @@ matcher_exec(PyObject *m)
     return 0;
 }
 
+/* Thread-safety contract: the automaton is built once via add_word +
+ * make_automaton (single-threaded), then only read during iter().
+ * Concurrent iter() calls are safe since they only read shared state.
+ * This justifies Py_MOD_GIL_NOT_USED for free-threaded Python. */
 static PyModuleDef_Slot matcher_slots[] = {
     {Py_mod_exec, matcher_exec},
 #ifdef Py_GIL_DISABLED

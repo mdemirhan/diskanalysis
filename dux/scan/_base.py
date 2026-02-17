@@ -1,3 +1,25 @@
+# Threaded directory scanner — base class and work queue.
+#
+# Architecture:
+#   ThreadedScannerBase uses the Template Method pattern: subclasses implement
+#   _scan_dir (read one directory, create ScanNode children), while the base
+#   class handles threading, work distribution, progress, cancellation, and
+#   tree finalization.
+#
+# Thread safety model:
+#   The scan tree is built concurrently, but each directory node is processed
+#   by exactly one worker (guaranteed by the work queue).  Workers append
+#   children to parent.children — since each parent is dequeued by one worker,
+#   there is no concurrent mutation of the same list.  The shared ScanStats
+#   counters are protected by stats_lock via local batching (see run_worker).
+#
+# Lifecycle (scan method):
+#   1. Validate root path → create root ScanNode → enqueue it.
+#   2. Workers loop: dequeue a directory, call _scan_dir, enqueue child dirs.
+#   3. When _outstanding hits 0, all dirs are scanned → workers exit.
+#   4. finalize_sizes aggregates child sizes bottom-up and sorts children.
+#   5. Return frozen ScanSnapshot wrapping the completed tree.
+
 from __future__ import annotations
 
 import collections
@@ -26,19 +48,30 @@ from dux.services.tree import finalize_sizes
 
 @dataclass(slots=True, frozen=True)
 class _Task:
+    """Work queue item: a directory node to scan and its depth in the tree."""
+
     node: ScanNode
     depth: int
 
 
 class _WorkQueue:
-    """Lightweight work queue with a single lock (vs 3 in queue.Queue)."""
+    """Lightweight work queue with a single lock.
+
+    stdlib queue.Queue uses three Conditions (not_empty, not_full, all_tasks_done),
+    each wrapping its own lock.  This queue is unbounded (no not_full) and uses a
+    simple Event for completion (no all_tasks_done Condition), cutting lock
+    contention in half for the producer-heavy scan workload.
+    """
 
     __slots__ = ("_deque", "_lock", "_not_empty", "_outstanding", "_done", "_shutdown")
 
     def __init__(self) -> None:
         self._deque: collections.deque[_Task] = collections.deque()
         self._lock = threading.Lock()
+        # Condition wraps _lock: `with self._not_empty` also acquires _lock.
         self._not_empty = threading.Condition(self._lock)
+        # _outstanding tracks enqueued-but-not-done tasks.  When it drops to 0,
+        # all work is complete (analogous to Queue.all_tasks_done).
         self._outstanding = 0
         self._done = threading.Event()
         self._shutdown = False
@@ -51,6 +84,8 @@ class _WorkQueue:
 
     def put_many(self, tasks: collections.abc.Iterable[_Task]) -> None:
         with self._lock:
+            # tasks is often a generator (can't len()), so measure the
+            # deque before/after to count how many were added.
             prev = len(self._deque)
             self._deque.extend(tasks)
             added = len(self._deque) - prev
@@ -59,6 +94,7 @@ class _WorkQueue:
                 self._not_empty.notify(added)
 
     def get(self) -> _Task | None:
+        """Block until a task is available.  Returns None on shutdown (exit sentinel)."""
         with self._not_empty:
             while not self._deque:
                 if self._shutdown:
@@ -113,6 +149,13 @@ def resolve_root(path: str, fs: FileSystem) -> str | ScanError:
 
 
 class ThreadedScannerBase(ABC):
+    """Template Method base for threaded directory scanners.
+
+    Subclasses implement ``_scan_dir`` (how to read one directory); this class
+    handles multi-threaded work distribution, depth limiting, progress
+    reporting, cancellation, and tree finalization.
+    """
+
     def __init__(self, workers: int = 8, fs: FileSystem = DEFAULT_FS) -> None:
         self._workers = max(1, workers)
         self._fs = fs
@@ -154,6 +197,9 @@ class ThreadedScannerBase(ABC):
         cancelled = threading.Event()
 
         def _is_cancelled() -> bool:
+            # Once any worker detects cancellation, the Event is set so
+            # subsequent checks are a fast Event.is_set() without calling
+            # the user's cancel_check callback.
             if cancelled.is_set():
                 return True
             if cancel_check is not None and cancel_check():
@@ -162,6 +208,7 @@ class ThreadedScannerBase(ABC):
             return False
 
         def emit_progress(current_path: str, local_files: int, local_dirs: int) -> None:
+            """Report approximate totals: flushed global stats + unflushed local counts."""
             if progress_callback is None:
                 return
             with stats_lock:
@@ -170,6 +217,9 @@ class ThreadedScannerBase(ABC):
             progress_callback(current_path, f, d)
 
         def run_worker() -> None:
+            # Workers batch stat updates locally and flush under the shared lock
+            # once per directory (in the finally block).  This reduces lock
+            # contention from once-per-file to once-per-directory.
             local_files = 0
             local_dirs = 0
             local_errors = 0
@@ -200,15 +250,22 @@ class ThreadedScannerBase(ABC):
                     local_dirs += dirs
                     local_errors += errs
 
+                    # Depth gate: the current directory is always scanned, but its
+                    # subdirectories are only enqueued if we haven't hit max_depth.
                     within_depth = options.max_depth is None or task.depth < options.max_depth
                     if within_depth:
                         next_depth = task.depth + 1
                         q.put_many(_Task(n, next_depth) for n in dir_children)
 
+                    # Emit progress roughly every 100 items (integer division
+                    # trick: fires when the count crosses a 100-boundary).
                     new_total = local_files + local_dirs
                     if new_total // 100 > prev_total // 100:
                         emit_progress(task.node.path, local_files, local_dirs)
                 except Exception:  # noqa: BLE001
+                    # Broad catch is intentional: _scan_dir may raise on
+                    # permission errors, broken symlinks, etc.  We count
+                    # the error and keep the worker alive for other dirs.
                     local_errors += 1
                 finally:
                     _flush_local()
@@ -218,9 +275,14 @@ class ThreadedScannerBase(ABC):
         threads = [threading.Thread(target=run_worker, daemon=True) for _ in range(num_workers)]
         for thread in threads:
             thread.start()
+        # join() waits until all enqueued tasks are done.  Only then do we
+        # call shutdown() to unblock workers stuck in get().  Reversing this
+        # order would let workers exit before all tasks are processed.
         q.join()
         q.shutdown()
         for thread in threads:
+            # Defensive timeout — workers should already be exiting after
+            # shutdown(); this prevents hanging if one gets stuck.
             thread.join(timeout=0.3)
 
         if cancelled.is_set():
@@ -232,5 +294,7 @@ class ThreadedScannerBase(ABC):
                 )
             )
 
+        # All workers are done.  Aggregate child sizes bottom-up and sort
+        # children by disk_usage descending, then freeze into a snapshot.
         finalize_sizes(root_node)
         return Ok(ScanSnapshot(root=root_node, stats=stats))

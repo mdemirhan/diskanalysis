@@ -8,6 +8,9 @@ from dux.models.scan import ScanNode
 from dux.scan._base import ThreadedScannerBase
 from dux.services.tree import LEAF_CHILDREN
 
+# C extension calling convention:
+#   (path, parent_node, leaf_sentinel, kind_dir, kind_file, ScanNode_class)
+#   -> (dir_child_nodes, file_count, dir_count, error_count)
 type _ScanFn = Callable[
     [str, ScanNode, tuple[()], NodeKind, NodeKind, type[ScanNode]],
     tuple[list[ScanNode], int, int, int],

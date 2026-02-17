@@ -50,6 +50,8 @@ class OsFileSystem:
         return StatResult(
             size=st.st_size,
             is_dir=statmod.S_ISDIR(st.st_mode),
+            # st_blocks is always in 512-byte units (POSIX convention),
+            # regardless of the filesystem's actual block size.
             disk_usage=st.st_blocks * 512,
         )
 

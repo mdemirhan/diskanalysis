@@ -79,9 +79,18 @@ _GLOB = 4  # fallback to fnmatch
 
 @dataclass(slots=True, frozen=True)
 class _Matcher:
+    """Result of classifying one expanded glob pattern.
+
+    For CONTAINS patterns like ``**/tmp/**``, the Aho-Corasick automaton needs
+    two keys: ``value="/tmp/"`` matches anywhere in the path, and ``alt="/tmp"``
+    matches only at the end (for paths like ``/a/tmp`` that lack a trailing ``/``).
+    For ENDSWITH patterns like ``**/*.log``, ``value=""`` (skipped by _build_ac)
+    and ``alt=".log"`` (end-of-path only).
+    """
+
     kind: int
     value: str
-    alt: str  # _CONTAINS: endswith variant without trailing /; _ENDSWITH: ""
+    alt: str
 
 
 def _has_glob_chars(s: str) -> bool:
@@ -139,6 +148,8 @@ def _expand_braces(pattern: str) -> tuple[str, ...]:
 def _match_pattern_slow(pattern: str, normalized_path: str, basename: str) -> bool:
     """Fallback for patterns that can't be classified into simple string ops."""
     if pattern.endswith("/**"):
+        # A pattern like "foo/bar/**" should match "foo/bar" itself (the
+        # directory), not just its descendants.  Try without the trailing "/**".
         base_pattern = pattern[: -len("/**")]
         if fnmatch(normalized_path, base_pattern):
             return True
@@ -204,6 +215,8 @@ class _ByKindBuilder:
         elif m.kind == _CONTAINS:
             self.ac_entries.append((m.value, m.alt, rule))
         elif m.kind == _ENDSWITH:
+            # Empty val tells _build_ac to skip the any-position key;
+            # only the end-only alt key (the suffix) is registered.
             self.ac_entries.append(("", m.value, rule))
         elif m.kind == _STARTSWITH:
             self.startswith.append((m.value, rule))
@@ -246,6 +259,8 @@ def compile_ruleset(
         at = rule.apply_to
         for expanded_pat in _expand_braces(rule.pattern):
             m = _classify(expanded_pat)
+            # IntFlag bitwise test: BOTH (= FILE | DIR) distributes
+            # the rule into both builders in a single loop iteration.
             for flag, b in builders.items():
                 if at & flag:
                     b.add(m, rule)
@@ -285,6 +300,9 @@ def match_all(
     matched: list[PatternRule] = []
     seen: set[str] = set()
 
+    # First-match-per-category gatekeeper: once a category has a hit,
+    # later matches for the same category are ignored.  Called from
+    # every tier below (EXACT, AC, STARTSWITH, GLOB, additional).
     def _try(rule: PatternRule) -> None:
         cat = rule.category.value
         if cat not in seen:
@@ -298,6 +316,11 @@ def match_all(
             _try(rule)
 
     # --- CONTAINS + ENDSWITH: Aho-Corasick automaton ---
+    # A single ac.iter() call finds all CONTAINS and ENDSWITH matches.
+    # end_only=True (set at compile time in _build_ac) restricts ENDSWITH
+    # and CONTAINS-alt hits to fire only when the match ends at the last
+    # character of the path — this is the runtime enforcement of the
+    # "match at end of path" semantic.
     if bk.ac is not None:
         _lpath_end = len(lpath) - 1
         for end_idx, entries in bk.ac.iter(lpath):

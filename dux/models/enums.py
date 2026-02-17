@@ -19,6 +19,9 @@ class InsightCategory(str, Enum):
         return self.value.replace("_", " ").title()
 
 
+# IntFlag enables bitwise distribution: a BOTH rule is added to both the
+# file and dir buckets at compile time via `if apply_to & flag` in patterns.py,
+# so the hot matching loop never branches on apply_to.
 class ApplyTo(IntFlag):
     FILE = 1
     DIR = 2

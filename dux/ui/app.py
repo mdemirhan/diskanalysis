@@ -51,6 +51,13 @@ _EMPTY_STATS = CategoryStats()
 
 
 class _PagedState:
+    """Pagination state for views with potentially large row counts.
+
+    ``all_rows`` are the materialized rows (bounded by max_insights_per_category).
+    ``total_items`` is the true count from the scan (unbounded).  The difference
+    drives the "Showing X of Y results" indicator in the status bar.
+    """
+
     __slots__ = ("all_rows", "page_index", "total_items")
 
     def __init__(self) -> None:
@@ -72,6 +79,14 @@ class _FilteredRowsCache:
 
 @dataclass(slots=True)
 class _ViewState:
+    """Per-view state preserved across Tab switches.
+
+    ``rows_cache`` holds the unfiltered row list (lazily built);
+    ``filtered_cache`` caches the result of applying ``filter_text``.
+    Both are invalidated by ``_invalidate_rows`` (which creates new objects
+    so the identity check in ``_filtered_rows`` detects staleness).
+    """
+
     cursor: int = 0
     scroll: float = 0.0
     filter_text: str = ""
@@ -196,6 +211,21 @@ class SearchOverlay(ModalScreen[str]):
 
 
 class DuxApp(App[None]):
+    """Interactive TUI for exploring disk usage.
+
+    Five views: overview (summary + top dirs), browse (expandable tree),
+    large_dir, large_file, and temp (paginated insight lists).
+
+    State management:
+      - Each view has its own ``_ViewState`` (cursor, scroll, filter, row cache).
+      - Switching views saves/restores state so you can Tab between views
+        without losing your position.
+      - Row caches are built lazily on first render and invalidated when
+        the view's data changes (e.g. expand/collapse in browse).
+      - Paged views (temp, large_dir, large_file) slice their full row list
+        into pages; non-paged views (overview, browse) show all rows at once.
+    """
+
     CSS_PATH = "app.tcss"
 
     def __init__(
@@ -332,6 +362,9 @@ class DuxApp(App[None]):
         if not self.rows:
             self.rows = [DisplayRow(path=".", name="(no data)", size_bytes=0)]
 
+        # Bar base: in browse view, bars are relative to the browse root
+        # (rows[0]) so expanding a subtree shows meaningful proportions.
+        # In other views, bars are relative to the scan root.
         total = max(
             1,
             self.rows[0].disk_usage if self.current_view == "browse" else self.root.disk_usage,
@@ -487,6 +520,8 @@ class DuxApp(App[None]):
         vs = self._views[view]
         filter_text = vs.filter_text
         cached = vs.filtered_cache
+        # Identity check (`is`, not `==`): detects if the underlying row list
+        # object was replaced by _invalidate_rows, without deep comparison.
         if cached is not None and cached.source_rows is rows and cached.filter_text == filter_text:
             return cached.rows
 
@@ -594,6 +629,8 @@ class DuxApp(App[None]):
                 )
             )
             if node.kind is NodeKind.DIRECTORY and node.path in self.expanded:
+                # Reverse before pushing onto LIFO stack to preserve
+                # display order (largest disk_usage first).
                 for child in reversed(node.children):
                     stack.append((child, depth + 1))
         return rows
@@ -676,6 +713,12 @@ class DuxApp(App[None]):
         self._move_selection(len(self.rows))
 
     def _sync_selection_from_table(self) -> None:
+        """Sync our ``selected_index`` with DataTable's internal cursor.
+
+        DataTable can move its cursor independently (mouse clicks, Textual's
+        built-in arrow key handling), so we pull its position before any
+        operation that reads ``selected_index``.
+        """
         if not self.rows:
             self.selected_index = 0
             return
@@ -708,12 +751,14 @@ class DuxApp(App[None]):
         self._refresh_all()
 
     def _collapse_or_parent(self) -> None:
+        """Vim-tree 'h' key: collapse if expanded, otherwise jump to parent."""
         if self.current_view != "browse":
             return
         path = self._selected_path()
         if path is None:
             return
 
+        # Phase 1: if the node is an expanded directory, collapse it.
         node = self.node_by_path.get(path)
         if (
             node is not None
@@ -726,6 +771,7 @@ class DuxApp(App[None]):
             self._refresh_all()
             return
 
+        # Phase 2: already collapsed (or a file) — move cursor to parent.
         parent = self.parent_by_path.get(path)
         if parent is None:
             return
@@ -736,6 +782,7 @@ class DuxApp(App[None]):
         self._refresh_all()
 
     def _expand_or_drill(self) -> None:
+        """Vim-tree 'l' key: expand if collapsed, drill in if already expanded."""
         if self.current_view != "browse":
             return
         path = self._selected_path()
@@ -758,6 +805,7 @@ class DuxApp(App[None]):
         self._refresh_all()
 
     def _drill_out(self) -> None:
+        """Move browse root up to parent, repositioning cursor on the old root."""
         if self.current_view != "browse":
             return
         if self.browse_root_path == self.root.path:
@@ -769,6 +817,8 @@ class DuxApp(App[None]):
         self.browse_root_path = parent
         self.selected_index = 0
         self._invalidate_browse_rows()
+        # Rebuild rows for the new root, then place cursor on the directory
+        # we just drilled out of so the user doesn't lose context.
         for idx, row in enumerate(self._build_rows_for_current_view()):
             if row.path == old_root:
                 self.selected_index = idx
@@ -853,6 +903,8 @@ class DuxApp(App[None]):
         if key in {"end", "ctrl+end"}:
             self._move_bottom()
             return True
+        # Vim-style gg: double-tap g within 500ms to jump to top.
+        # A timer resets pending_g if the second g doesn't arrive in time.
         if key == "g" or char == "g":
             if self.pending_g:
                 self.pending_g = False
@@ -897,6 +949,8 @@ class DuxApp(App[None]):
 
     @override
     def on_key(self, event) -> None:  # type: ignore[override]
+        """Central key dispatch.  Priority: escape → global → yank →
+        navigation → pagination → browse.  First handler to match wins."""
         key = event.key
         char = event.character or ""
 

@@ -22,7 +22,8 @@
  *   scan_dir_bulk_nodes(...)   [macOS only, uses getattrlistbulk]
  */
 
-/* Build full child path: parent + "/" + name */
+/* Build full child path: parent + "/" + name.
+ * Returns a heap-allocated string; caller must free(). */
 static char *
 join_path(const char *parent, const char *name)
 {
@@ -46,7 +47,8 @@ join_path(const char *parent, const char *name)
 
 typedef struct {
     char *path;     /* full child path (heap-allocated) */
-    char *name;     /* points into *path* after last '/' */
+    char *name;     /* NOT separately allocated — points into *path* after
+                       the last '/'.  free(path) invalidates name. */
     int is_dir;
     long long size;
     long long disk_usage;
@@ -188,11 +190,14 @@ _build_nodes_from_buf(EntryBuf *buf, long long err_count,
         if (e->is_dir) {
             PyObject *children = PyList_New(0);
             if (!children) goto error;
-            /* N steals ref to children */
+            /* "N" steals the reference to children (transfers ownership).
+             * "O" would increment the refcount, leaking the list. */
             node = PyObject_CallFunction(ScanNode_cls, "ssOLLN",
                                          e->path, e->name, kind_dir,
                                          (long long)0, (long long)0, children);
         } else {
+            /* "O" borrows leaf (increments refcount) — the shared
+             * immutable sentinel is reused across all file nodes. */
             node = PyObject_CallFunction(ScanNode_cls, "ssOLLO",
                                          e->path, e->name, kind_file,
                                          e->size, e->disk_usage, leaf);
@@ -248,6 +253,9 @@ walker_scan_dir_nodes(PyObject *self, PyObject *args)
 
     long long error_count;
 
+    /* Two-phase design: release the GIL during I/O (readdir + lstat), then
+     * reacquire it to create Python objects.  This is the core performance
+     * optimization — other Python threads can run while we do syscalls. */
     Py_BEGIN_ALLOW_THREADS
     error_count = _fill_buf_readdir(dir_path, &buf);
     Py_END_ALLOW_THREADS
@@ -284,6 +292,10 @@ _fill_buf_bulk(const char *dir_path, EntryBuf *buf)
         alist.bitmapcount = ATTR_BIT_MAP_COUNT;
         alist.commonattr  = ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_NAME | ATTR_CMN_OBJTYPE;
         alist.fileattr    = ATTR_FILE_DATALENGTH | ATTR_FILE_ALLOCSIZE;
+        /* NOTE: the kernel returns attributes in a canonical order defined
+         * by bit position, NOT the order listed in the C expression above.
+         * The parse loop below MUST read ALLOCSIZE before DATALENGTH to
+         * match the kernel's packing order. */
 
         char attrbuf[256 * 1024];
         int count;
@@ -379,6 +391,7 @@ walker_scan_dir_bulk_nodes(PyObject *self, PyObject *args)
 
     long long error_count;
 
+    /* GIL released during I/O, reacquired for Python object creation. */
     Py_BEGIN_ALLOW_THREADS
     error_count = _fill_buf_bulk(dir_path, &buf);
     Py_END_ALLOW_THREADS

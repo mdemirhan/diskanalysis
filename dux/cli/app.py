@@ -61,6 +61,13 @@ def _render_scan_panel(progress: _ScanProgress, workers: int, phase: str) -> Pan
 
 
 def _scan_with_progress(path: Path, options: ScanOptions, workers: int, scanner: Scanner) -> ScanResult:
+    """Run the scan in a background thread while the main thread drives a Rich Live display.
+
+    A shared ``_ScanProgress`` struct (protected by *lock*) carries approximate
+    counts from the scan callback to the render loop.  The main thread takes
+    a shallow copy via ``dataclasses.replace`` to avoid holding the lock during
+    (relatively slow) terminal rendering.
+    """
     lock = threading.Lock()
     done = threading.Event()
     result: ScanResult | None = None
@@ -102,9 +109,12 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int, scanner:
         transient=True,
     ) as live:
         while not done.is_set():
+            # Shallow-copy progress under the lock so we don't hold it
+            # during rendering (which is slow relative to the lock).
             with lock:
                 snapshot = replace(progress)
             live.update(_render_scan_panel(snapshot, workers, "Scanning directory tree..."))
+            # ~12.5 Hz refresh, matching refresh_per_second=12 above.
             time.sleep(0.08)
 
         with lock:
@@ -186,6 +196,8 @@ def run(
         max_depth=config.max_depth,
     )
 
+    # Lazy imports for posix/macos: avoids loading the C extension on
+    # platforms where it may not be compiled (or when --scanner=auto/python).
     scanner_impl: Scanner
     if scanner == "auto":
         scanner_impl = default_scanner(workers=config.scan_workers)

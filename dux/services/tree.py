@@ -13,6 +13,10 @@ LEAF_CHILDREN: tuple[()] = ()
 
 def finalize_sizes(root: ScanNode) -> None:
     """Bottom-up pass: sum children sizes into directory nodes and sort by disk_usage."""
+    # Two-pass iterative approach (avoids recursion on deep trees):
+    #   Pass 1: DFS collects directory nodes in pre-order into `stack`.
+    #   Pass 2: reversed(stack) gives post-order (leaves before parents),
+    #           so each parent's children are already finalized when we sum.
     stack: list[ScanNode] = []
     visit: list[ScanNode] = [root]
     while visit:
