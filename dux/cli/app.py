@@ -18,8 +18,9 @@ from result import Err
 
 from dux.config.defaults import default_config
 from dux.config.loader import load_config, sample_config_json
+from dux.config.schema import clamp_field
 from dux.models.scan import ScanError, ScanErrorCode, ScanOptions, ScanResult
-from dux.scan import PythonScanner, Scanner, default_scanner
+from dux.scan import Scanner, create_scanner
 from dux.services.insights import generate_insights
 from dux.services.summary import render_focused_summary, render_summary
 from dux.ui.app import DuxApp
@@ -177,18 +178,17 @@ def run(
         config = config_result.unwrap()
 
     overrides: dict[str, object] = {}
-    if workers is not None:
-        overrides["scan_workers"] = max(1, workers)
-    if top is not None:
-        overrides["top_count"] = max(1, top)
-    if max_insights is not None:
-        overrides["max_insights_per_category"] = max(10, max_insights)
-    if overview_dirs is not None:
-        overrides["overview_top_dirs"] = max(5, overview_dirs)
-    if scroll_step is not None:
-        overrides["scroll_step"] = max(1, scroll_step)
-    if page_size is not None:
-        overrides["page_size"] = max(10, page_size)
+    cli_overrides: dict[str, int | None] = {
+        "scan_workers": workers,
+        "top_count": top,
+        "max_insights_per_category": max_insights,
+        "overview_top_dirs": overview_dirs,
+        "scroll_step": scroll_step,
+        "page_size": page_size,
+    }
+    for attr, val in cli_overrides.items():
+        if val is not None:
+            overrides[attr] = clamp_field(val, attr)
     if max_depth is not None:
         overrides["max_depth"] = max(1, max_depth)
     if overrides:
@@ -198,28 +198,12 @@ def run(
         max_depth=config.max_depth,
     )
 
-    # Lazy imports for posix/macos: avoids loading the C extension on
-    # platforms where it may not be compiled (or when --scanner=auto/python).
     scanner_impl: Scanner
-    if scanner == "auto":
-        scanner_impl = default_scanner(workers=config.scan_workers)
-    elif scanner == "python":
-        scanner_impl = PythonScanner(workers=config.scan_workers)
-    elif scanner == "posix":
-        from dux._walker import scan_dir_nodes
-
-        from dux.scan.native_scanner import NativeScanner
-
-        scanner_impl = NativeScanner(scan_dir_nodes, workers=config.scan_workers)
-    elif scanner == "macos":
-        from dux._walker import scan_dir_bulk_nodes
-
-        from dux.scan.native_scanner import NativeScanner
-
-        scanner_impl = NativeScanner(scan_dir_bulk_nodes, workers=config.scan_workers)
-    else:
-        console.print(f"[red]Unknown scanner: {scanner}. Use: auto, python, posix, macos.[/]")
-        raise typer.Exit(1)
+    try:
+        scanner_impl = create_scanner(scanner, workers=config.scan_workers)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
 
     if verbose:
         gil_status = "enabled" if sys._is_gil_enabled() else "disabled"  # pyright: ignore[reportPrivateUsage]  # noqa: SLF001

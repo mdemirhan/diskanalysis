@@ -51,10 +51,12 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
       4. Extract and deduplicate the heaps into a flat sorted list.
     """
     # --- build additional path rules ---
+    # Bases are lowercased for case-insensitive matching, consistent with
+    # the main glob/AC pipeline which compares against lpath.
     additional_paths: list[tuple[str, PatternRule]] = []
     for category, sources in config.additional_paths.items():
         for raw_base in sources:
-            base = str(Path(raw_base).expanduser()).rstrip("/")
+            base = str(Path(raw_base).expanduser()).rstrip("/").lower()
             additional_paths.append(
                 (
                     base,
@@ -119,7 +121,7 @@ def generate_insights(root: ScanNode, config: AppConfig) -> InsightBundle:
         lbase = basename.lower()
 
         # Single-pass match across all categories
-        matched_rules = match_all(ruleset, lpath, lbase, is_dir, path)
+        matched_rules = match_all(ruleset, lpath, lbase, is_dir)
 
         local_in_temp_cache = False
         build_rule: PatternRule | None = None

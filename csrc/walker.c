@@ -108,7 +108,8 @@ entrybuf_free(EntryBuf *b)
 /* GIL-free I/O helpers                                               */
 /* ------------------------------------------------------------------ */
 
-/* Fill EntryBuf via opendir/readdir/lstat (no GIL needed). */
+/* Fill EntryBuf via opendir/readdir/lstat (no GIL needed).
+ * Returns error_count >= 0 on success, -1 on OOM (partial results). */
 static long long
 _fill_buf_readdir(const char *dir_path, EntryBuf *buf)
 {
@@ -124,7 +125,7 @@ _fill_buf_readdir(const char *dir_path, EntryBuf *buf)
             }
 
             char *child_path = join_path(dir_path, ep->d_name);
-            if (!child_path) break;
+            if (!child_path) { closedir(dp); return -1; }
 
             struct stat st;
             if (lstat(child_path, &st) < 0) {
@@ -144,7 +145,8 @@ _fill_buf_readdir(const char *dir_path, EntryBuf *buf)
             if (entrybuf_push(buf, child_path, name, is_dir,
                               size, disk_usage) < 0) {
                 free(child_path);
-                break;
+                closedir(dp);
+                return -1;
             }
         }
         closedir(dp);
@@ -260,6 +262,11 @@ walker_scan_dir_nodes(PyObject *self, PyObject *args)
     error_count = _fill_buf_readdir(dir_path, &buf);
     Py_END_ALLOW_THREADS
 
+    if (error_count < 0) {
+        entrybuf_free(&buf);
+        return PyErr_NoMemory();
+    }
+
     PyObject *result = _build_nodes_from_buf(&buf, error_count, parent, leaf,
                                               kind_dir, kind_file, ScanNode_cls);
     entrybuf_free(&buf);
@@ -279,7 +286,8 @@ typedef struct {
     /* variable-length entries follow */
 } BulkAttrBuf;
 
-/* Fill EntryBuf via getattrlistbulk (no GIL needed). */
+/* Fill EntryBuf via getattrlistbulk (no GIL needed).
+ * Returns error_count >= 0 on success, -1 on OOM (partial results). */
 static long long
 _fill_buf_bulk(const char *dir_path, EntryBuf *buf)
 {
@@ -343,7 +351,7 @@ _fill_buf_bulk(const char *dir_path, EntryBuf *buf)
 
                 {
                     char *child_path = join_path(dir_path, name);
-                    if (!child_path) break;
+                    if (!child_path) { close(fd); return -1; }
 
                     size_t plen = strlen(dir_path);
                     char *name_ptr = child_path + plen;
@@ -352,7 +360,8 @@ _fill_buf_bulk(const char *dir_path, EntryBuf *buf)
                     if (entrybuf_push(buf, child_path, name_ptr,
                                       is_dir, size, disk_usage) < 0) {
                         free(child_path);
-                        break;
+                        close(fd);
+                        return -1;
                     }
                 }
 
@@ -395,6 +404,11 @@ walker_scan_dir_bulk_nodes(PyObject *self, PyObject *args)
     Py_BEGIN_ALLOW_THREADS
     error_count = _fill_buf_bulk(dir_path, &buf);
     Py_END_ALLOW_THREADS
+
+    if (error_count < 0) {
+        entrybuf_free(&buf);
+        return PyErr_NoMemory();
+    }
 
     PyObject *result = _build_nodes_from_buf(&buf, error_count, parent, leaf,
                                               kind_dir, kind_file, ScanNode_cls);

@@ -26,6 +26,31 @@ class ScanNode:
     def is_dir(self) -> bool:
         return self.kind is NodeKind.DIRECTORY
 
+    @classmethod
+    def file(cls, path: str, name: str, size_bytes: int, disk_usage: int) -> ScanNode:
+        # Import here to avoid circular import at module level.
+        from dux.services.tree import LEAF_CHILDREN
+
+        return cls(
+            path=path,
+            name=name,
+            kind=NodeKind.FILE,
+            size_bytes=size_bytes,
+            disk_usage=disk_usage,
+            children=LEAF_CHILDREN,  # type: ignore[arg-type]  # immutable sentinel
+        )
+
+    @classmethod
+    def directory(cls, path: str, name: str) -> ScanNode:
+        return cls(
+            path=path,
+            name=name,
+            kind=NodeKind.DIRECTORY,
+            size_bytes=0,
+            disk_usage=0,
+            children=[],
+        )
+
 
 @dataclass(slots=True)
 class ScanStats:

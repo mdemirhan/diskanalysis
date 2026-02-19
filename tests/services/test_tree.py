@@ -1,30 +1,20 @@
 from __future__ import annotations
 
 from dux.models.enums import NodeKind
-from dux.models.scan import ScanNode
-from dux.services.tree import LEAF_CHILDREN, iter_nodes, top_nodes
-
-
-def _dir(path: str, name: str, children: list[ScanNode] | None = None, du: int = 0) -> ScanNode:
-    return ScanNode(
-        path=path, name=name, kind=NodeKind.DIRECTORY, size_bytes=du, disk_usage=du, children=children or []
-    )
-
-
-def _file(path: str, name: str, du: int = 0) -> ScanNode:
-    return ScanNode(path=path, name=name, kind=NodeKind.FILE, size_bytes=du, disk_usage=du, children=LEAF_CHILDREN)
+from dux.services.tree import iter_nodes, top_nodes
+from tests.factories import make_dir, make_file
 
 
 class TestIterNodes:
     def test_single_root(self) -> None:
-        root = _dir("/root", "root")
+        root = make_dir("/root")
         assert list(iter_nodes(root)) == [root]
 
     def test_nested_tree(self) -> None:
-        f1 = _file("/root/a.txt", "a.txt", du=10)
-        f2 = _file("/root/sub/b.txt", "b.txt", du=20)
-        sub = _dir("/root/sub", "sub", [f2], du=20)
-        root = _dir("/root", "root", [f1, sub], du=30)
+        f1 = make_file("/root/a.txt", du=10)
+        f2 = make_file("/root/sub/b.txt", du=20)
+        sub = make_dir("/root/sub", du=20, children=[f2])
+        root = make_dir("/root", du=30, children=[f1, sub])
         paths = [n.path for n in iter_nodes(root)]
         assert "/root" in paths
         assert "/root/a.txt" in paths
@@ -35,40 +25,40 @@ class TestIterNodes:
 
 class TestTopNodes:
     def test_kind_none_returns_all(self) -> None:
-        f1 = _file("/r/a", "a", du=10)
-        f2 = _file("/r/b", "b", du=20)
-        sub = _dir("/r/sub", "sub", [f2], du=20)
-        root = _dir("/r", "root", [f1, sub], du=30)
+        f1 = make_file("/r/a", du=10)
+        f2 = make_file("/r/b", du=20)
+        sub = make_dir("/r/sub", du=20, children=[f2])
+        root = make_dir("/r", du=30, children=[f1, sub])
         result = top_nodes(root, 10, kind=None)
         # root excluded, all others present
         assert len(result) == 3
         assert result[0].path in {"/r/sub", "/r/b"}
 
     def test_kind_file(self) -> None:
-        f1 = _file("/r/a", "a", du=10)
-        f2 = _file("/r/b", "b", du=20)
-        sub = _dir("/r/sub", "sub", [], du=5)
-        root = _dir("/r", "root", [f1, f2, sub], du=35)
+        f1 = make_file("/r/a", du=10)
+        f2 = make_file("/r/b", du=20)
+        sub = make_dir("/r/sub", du=5)
+        root = make_dir("/r", du=35, children=[f1, f2, sub])
         result = top_nodes(root, 10, kind=NodeKind.FILE)
         assert all(n.kind is NodeKind.FILE for n in result)
         assert len(result) == 2
         assert result[0].disk_usage >= result[1].disk_usage
 
     def test_kind_directory(self) -> None:
-        f1 = _file("/r/a", "a", du=10)
-        sub = _dir("/r/sub", "sub", [], du=5)
-        root = _dir("/r", "root", [f1, sub], du=15)
+        f1 = make_file("/r/a", du=10)
+        sub = make_dir("/r/sub", du=5)
+        root = make_dir("/r", du=15, children=[f1, sub])
         result = top_nodes(root, 10, kind=NodeKind.DIRECTORY)
         assert len(result) == 1
         assert result[0].path == "/r/sub"
 
     def test_n_greater_than_count(self) -> None:
-        f1 = _file("/r/a", "a", du=10)
-        root = _dir("/r", "root", [f1], du=10)
+        f1 = make_file("/r/a", du=10)
+        root = make_dir("/r", du=10, children=[f1])
         result = top_nodes(root, 100, kind=None)
         assert len(result) == 1
 
     def test_root_excluded(self) -> None:
-        root = _dir("/r", "root", [], du=100)
+        root = make_dir("/r", du=100)
         result = top_nodes(root, 10, kind=None)
         assert len(result) == 0

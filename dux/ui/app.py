@@ -16,10 +16,16 @@ from textual.widgets import DataTable, Input, Static
 
 from dux.config.schema import AppConfig
 from dux.models.enums import InsightCategory, NodeKind
-from dux.models.insight import CategoryStats, Insight, InsightBundle
+from dux.models.insight import CategoryStats, InsightBundle
 from dux.models.scan import ScanNode, ScanStats
 from dux.services.formatting import format_bytes, relative_bar
-from dux.services.tree import top_nodes
+from dux.ui.views import (
+    DisplayRow,
+    browse_rows,
+    insight_rows,
+    overview_rows,
+    top_nodes_rows,
+)
 
 
 TABS: tuple[str, ...] = ("overview", "browse", "large_dir", "large_file", "temp")
@@ -31,16 +37,6 @@ _TAB_LABELS: dict[str, str] = {
     "large_dir": "Directories by Size",
     "large_file": "Files by Size",
 }
-
-
-@dataclass(slots=True)
-class DisplayRow:
-    path: str
-    name: str
-    size_bytes: int
-    type_label: str = ""
-    category: str | None = None
-    disk_usage: int = 0
 
 
 _PAGED_VIEWS = {"temp", "large_dir", "large_file"}
@@ -264,11 +260,6 @@ class DuxApp(App[None]):
         self._views: dict[str, _ViewState] = {
             v: _ViewState(paged=_PagedState() if v in _PAGED_VIEWS else None) for v in TABS
         }
-
-    def _relative_path(self, absolute_path: str) -> str:
-        if absolute_path.startswith(self._root_prefix):
-            return absolute_path[len(self._root_prefix) :]
-        return absolute_path
 
     def _index_tree(self, root: ScanNode) -> None:
         stack: list[tuple[ScanNode, str | None]] = [(root, None)]
@@ -538,137 +529,18 @@ class DuxApp(App[None]):
         )
         return filtered
 
-    def _category_size_bytes(self, *categories: InsightCategory) -> int:
-        bc = self.bundle.by_category
-        return sum(bc.get(cat, _EMPTY_STATS).size_bytes for cat in categories)
-
-    def _category_disk_usage(self, *categories: InsightCategory) -> int:
-        bc = self.bundle.by_category
-        return sum(bc.get(cat, _EMPTY_STATS).disk_usage for cat in categories)
-
     def _overview_rows(self) -> list[DisplayRow]:
-        temp_sz = self._category_size_bytes(InsightCategory.TEMP)
-        temp_du = self._category_disk_usage(InsightCategory.TEMP)
-        cache_sz = self._category_size_bytes(InsightCategory.CACHE)
-        cache_du = self._category_disk_usage(InsightCategory.CACHE)
-        build_sz = self._category_size_bytes(InsightCategory.BUILD_ARTIFACT)
-        build_du = self._category_disk_usage(InsightCategory.BUILD_ARTIFACT)
-
-        rows: list[DisplayRow] = [
-            DisplayRow(
-                path="",
-                name=f"Total Disk: {format_bytes(self.root.disk_usage)}",
-                size_bytes=self.root.size_bytes,
-                disk_usage=self.root.disk_usage,
-            ),
-            DisplayRow(
-                path="",
-                name=f"Files: {self.stats.files:,}",
-                size_bytes=0,
-            ),
-            DisplayRow(
-                path="",
-                name=f"Directories: {self.stats.directories:,}",
-                size_bytes=0,
-            ),
-            DisplayRow(
-                path="",
-                name=f"Temp: {format_bytes(temp_du)}",
-                size_bytes=temp_sz,
-                disk_usage=temp_du,
-            ),
-            DisplayRow(
-                path="",
-                name=f"Cache: {format_bytes(cache_du)}",
-                size_bytes=cache_sz,
-                disk_usage=cache_du,
-            ),
-            DisplayRow(
-                path="",
-                name=f"Build Artifacts: {format_bytes(build_du)}",
-                size_bytes=build_sz,
-                disk_usage=build_du,
-            ),
-            DisplayRow(
-                path="",
-                name=f"─────── Largest {self._overview_top} directories ───────",
-                size_bytes=0,
-            ),
-        ]
-
-        top_dirs = top_nodes(self.root, self._overview_top, NodeKind.DIRECTORY)
-        for node in top_dirs:
-            display_path = self._relative_path(node.path)
-            rows.append(
-                DisplayRow(
-                    path=node.path,
-                    name=display_path,
-                    size_bytes=node.size_bytes,
-                    disk_usage=node.disk_usage,
-                )
-            )
-        return rows
+        return overview_rows(self.root, self.stats, self.bundle.by_category, self._overview_top, self._root_prefix)
 
     def _browse_rows(self) -> list[DisplayRow]:
         browse_root = self.node_by_path.get(self.browse_root_path, self.root)
-        rows: list[DisplayRow] = []
-        stack: list[tuple[ScanNode, int]] = [(browse_root, 0)]
-        while stack:
-            node, depth = stack.pop()
-            if node.kind is NodeKind.DIRECTORY:
-                marker = "▼" if node.path in self.expanded else "▶"
-                label = f"{'  ' * depth}{marker} {node.name}"
-            else:
-                label = f"{'  ' * depth}  {node.name}"
-            rows.append(
-                DisplayRow(
-                    path=node.path,
-                    name=label,
-                    size_bytes=node.size_bytes,
-                    disk_usage=node.disk_usage,
-                )
-            )
-            if node.kind is NodeKind.DIRECTORY and node.path in self.expanded:
-                # Reverse before pushing onto LIFO stack to preserve
-                # display order (largest disk_usage first).
-                for child in reversed(node.children):
-                    stack.append((child, depth + 1))
-        return rows
+        return browse_rows(browse_root, self.expanded)
 
-    def _insight_rows(self, predicate: Callable[[Insight], bool]) -> list[DisplayRow]:
-        rows: list[DisplayRow] = []
-        for item in self.bundle.insights:
-            if not predicate(item):
-                continue
-            display_path = self._relative_path(item.path)
-            label = item.category.label
-            node = self.node_by_path.get(item.path)
-            type_label = "Dir" if node is not None and node.is_dir else "File"
-            rows.append(
-                DisplayRow(
-                    path=item.path,
-                    name=display_path,
-                    size_bytes=item.size_bytes,
-                    category=label,
-                    type_label=type_label,
-                    disk_usage=item.disk_usage,
-                )
-            )
-        return rows
+    def _insight_rows(self, predicate: Callable[..., bool]) -> list[DisplayRow]:
+        return insight_rows(self.bundle.insights, self.node_by_path, self._root_prefix, predicate)
 
     def _top_nodes_rows(self, kind: NodeKind) -> list[DisplayRow]:
-        rows: list[DisplayRow] = []
-        for node in top_nodes(self.root, self._top_n_limit, kind):
-            display_path = self._relative_path(node.path)
-            rows.append(
-                DisplayRow(
-                    path=node.path,
-                    name=display_path,
-                    size_bytes=node.size_bytes,
-                    disk_usage=node.disk_usage,
-                )
-            )
-        return rows
+        return top_nodes_rows(self.root, self._top_n_limit, kind, self._root_prefix)
 
     def _set_view(self, view: str) -> None:
         if view not in TABS:

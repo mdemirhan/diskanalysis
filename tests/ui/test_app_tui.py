@@ -5,27 +5,18 @@ import pytest
 from dux.config.schema import AppConfig
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import CategoryStats, Insight, InsightBundle
-from dux.models.scan import ScanNode, ScanStats
-from dux.services.tree import LEAF_CHILDREN, finalize_sizes
+from dux.models.scan import ScanStats
+from dux.services.tree import finalize_sizes
 from dux.ui.app import DuxApp
-
-
-def _dir(path: str, name: str, children: list[ScanNode] | None = None, du: int = 0) -> ScanNode:
-    return ScanNode(
-        path=path, name=name, kind=NodeKind.DIRECTORY, size_bytes=du, disk_usage=du, children=children or []
-    )
-
-
-def _file(path: str, name: str, du: int = 0) -> ScanNode:
-    return ScanNode(path=path, name=name, kind=NodeKind.FILE, size_bytes=du, disk_usage=du, children=LEAF_CHILDREN)
+from tests.factories import make_dir, make_file
 
 
 def _make_app(apparent_size: bool = False) -> DuxApp:
-    f1 = _file("/r/a.txt", "a.txt", du=100)
-    f2 = _file("/r/b.txt", "b.txt", du=200)
-    sub_f = _file("/r/sub/c.txt", "c.txt", du=50)
-    sub = _dir("/r/sub", "sub", [sub_f], du=50)
-    root = _dir("/r", "root", [f1, f2, sub], du=350)
+    f1 = make_file("/r/a.txt", du=100)
+    f2 = make_file("/r/b.txt", du=200)
+    sub_f = make_file("/r/sub/c.txt", du=50)
+    sub = make_dir("/r/sub", du=50, children=[sub_f])
+    root = make_dir("/r", du=350, children=[f1, f2, sub])
     finalize_sizes(root)
     stats = ScanStats(files=3, directories=2)
     insights = [

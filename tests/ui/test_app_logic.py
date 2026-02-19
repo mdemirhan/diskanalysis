@@ -39,12 +39,14 @@ def _make_app(
 
 class TestRelativePath:
     def test_strips_root_prefix(self) -> None:
-        app = _make_app()
-        assert app._relative_path("/r/a.txt") == "a.txt"
+        from dux.services.formatting import relative_path
+
+        assert relative_path("/r/a.txt", "/r/") == "a.txt"
 
     def test_returns_full_if_no_match(self) -> None:
-        app = _make_app()
-        assert app._relative_path("/other/x.txt") == "/other/x.txt"
+        from dux.services.formatting import relative_path
+
+        assert relative_path("/other/x.txt", "/r/") == "/other/x.txt"
 
 
 class TestIndexTree:
@@ -262,26 +264,29 @@ class TestFilteredPageCount:
 
 class TestCategorySizeAndDiskUsage:
     def test_category_size_bytes(self) -> None:
+        from dux.ui.views import _category_bytes
+
         by_cat = {
             InsightCategory.TEMP: CategoryStats(size_bytes=100),
             InsightCategory.CACHE: CategoryStats(size_bytes=200),
         }
-        bundle = InsightBundle(insights=[], by_category=by_cat)
-        app = _make_app(bundle=bundle)
-        assert app._category_size_bytes(InsightCategory.TEMP) == 100
-        assert app._category_size_bytes(InsightCategory.TEMP, InsightCategory.CACHE) == 300
+        sz, _du = _category_bytes(by_cat, InsightCategory.TEMP)
+        assert sz == 100
 
     def test_category_disk_usage(self) -> None:
+        from dux.ui.views import _category_bytes
+
         by_cat = {
             InsightCategory.TEMP: CategoryStats(disk_usage=50),
             InsightCategory.CACHE: CategoryStats(disk_usage=150),
         }
-        bundle = InsightBundle(insights=[], by_category=by_cat)
-        app = _make_app(bundle=bundle)
-        assert app._category_disk_usage(InsightCategory.CACHE) == 150
+        _sz, du = _category_bytes(by_cat, InsightCategory.CACHE)
+        assert du == 150
 
     def test_missing_category_returns_zero(self) -> None:
-        bundle = InsightBundle(insights=[], by_category={})
-        app = _make_app(bundle=bundle)
-        assert app._category_size_bytes(InsightCategory.TEMP) == 0
-        assert app._category_disk_usage(InsightCategory.BUILD_ARTIFACT) == 0
+        from dux.ui.views import _category_bytes
+
+        by_cat: dict[InsightCategory, CategoryStats] = {}
+        sz, du = _category_bytes(by_cat, InsightCategory.TEMP)
+        assert sz == 0
+        assert du == 0

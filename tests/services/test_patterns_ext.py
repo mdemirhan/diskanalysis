@@ -48,7 +48,7 @@ class TestCompileRulesetGlob:
     def test_glob_match_via_match_all(self) -> None:
         rule = PatternRule("test", "foo/*.log", InsightCategory.TEMP)
         rs = compile_ruleset([rule])
-        hits = match_all(rs, "foo/app.log", "app.log", False, "foo/app.log")
+        hits = match_all(rs, "foo/app.log", "app.log", False)
         assert len(hits) == 1
         assert hits[0].name == "test"
 
@@ -57,17 +57,17 @@ class TestApplyToDirMatching:
     def test_dir_only_rule_matches_dir(self) -> None:
         rule = PatternRule("egg", "**/*.egg-info", InsightCategory.BUILD_ARTIFACT, apply_to=ApplyTo.DIR)
         rs = compile_ruleset([rule])
-        hits = match_all(rs, "/r/pkg.egg-info", "pkg.egg-info", True, "/r/pkg.egg-info")
+        hits = match_all(rs, "/r/pkg.egg-info", "pkg.egg-info", True)
         assert len(hits) == 1
 
     def test_dir_only_rule_skips_file(self) -> None:
         rule = PatternRule("egg", "**/*.egg-info", InsightCategory.BUILD_ARTIFACT, apply_to=ApplyTo.DIR)
         rs = compile_ruleset([rule])
-        hits = match_all(rs, "/r/pkg.egg-info", "pkg.egg-info", False, "/r/pkg.egg-info")
+        hits = match_all(rs, "/r/pkg.egg-info", "pkg.egg-info", False)
         assert len(hits) == 0
 
     def test_file_only_rule_skips_dir(self) -> None:
         rule = PatternRule("log", "**/*.log", InsightCategory.TEMP, apply_to=ApplyTo.FILE)
         rs = compile_ruleset([rule])
-        hits = match_all(rs, "/r/app.log", "app.log", True, "/r/app.log")
+        hits = match_all(rs, "/r/app.log", "app.log", True)
         assert len(hits) == 0

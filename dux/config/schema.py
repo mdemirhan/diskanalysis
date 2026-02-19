@@ -5,6 +5,28 @@ from typing import Any
 
 from dux.models.enums import ApplyTo, InsightCategory
 
+# (json_key, attr_name, minimum) — shared by from_dict and CLI override clamping.
+_INT_FIELDS: tuple[tuple[str, str, int], ...] = (
+    ("scanWorkers", "scan_workers", 1),
+    ("topCount", "top_count", 1),
+    ("pageSize", "page_size", 10),
+    ("maxInsightsPerCategory", "max_insights_per_category", 10),
+    ("overviewTopDirs", "overview_top_dirs", 5),
+    ("scrollStep", "scroll_step", 1),
+)
+
+
+def clamp_field(value: int, field_name: str) -> int:
+    """Clamp *value* to the minimum defined for *field_name* in _INT_FIELDS."""
+    for _, attr, minimum in _INT_FIELDS:
+        if attr == field_name:
+            return max(minimum, value)
+    return value
+
+
+def _get_int(data: dict[str, Any], json_key: str, default: int, minimum: int) -> int:
+    return max(minimum, int(data.get(json_key, default)))
+
 
 @dataclass(slots=True)
 class PatternRule:
@@ -78,17 +100,13 @@ class AppConfig:
         else:
             patterns = list(defaults.patterns)
 
+        int_kwargs: dict[str, int] = {}
+        for json_key, attr, minimum in _INT_FIELDS:
+            int_kwargs[attr] = _get_int(data, json_key, getattr(defaults, attr), minimum)
+
         return cls(
             patterns=patterns,
             additional_paths=additional_paths,
             max_depth=int(max_depth_raw) if max_depth_raw is not None else None,
-            scan_workers=max(1, int(data.get("scanWorkers", defaults.scan_workers))),
-            top_count=max(1, int(data.get("topCount", defaults.top_count))),
-            page_size=max(10, int(data.get("pageSize", defaults.page_size))),
-            max_insights_per_category=max(
-                10,
-                int(data.get("maxInsightsPerCategory", defaults.max_insights_per_category)),
-            ),
-            overview_top_dirs=max(5, int(data.get("overviewTopDirs", defaults.overview_top_dirs))),
-            scroll_step=max(1, int(data.get("scrollStep", defaults.scroll_step))),
+            **int_kwargs,
         )

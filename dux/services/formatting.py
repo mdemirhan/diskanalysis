@@ -16,6 +16,12 @@ def format_bytes(size: int) -> str:
     return f"{value:.1f} {UNITS[unit]}"
 
 
+def relative_path(absolute_path: str, root_prefix: str) -> str:
+    if absolute_path.startswith(root_prefix):
+        return absolute_path[len(root_prefix) :]
+    return absolute_path
+
+
 def relative_bar(size: int, total: int, width: int = 16) -> str:
     if width <= 0 or total <= 0:
         return ""

@@ -30,7 +30,6 @@ from dataclasses import dataclass
 
 from result import Err, Ok
 
-from dux.models.enums import NodeKind
 from dux.models.scan import (
     CancelCheck,
     ProgressCallback,
@@ -180,14 +179,7 @@ class ThreadedScannerBase(ABC):
         resolved_root = resolved
 
         root_name = resolved_root.rsplit("/", 1)[-1] or resolved_root
-        root_node = ScanNode(
-            path=resolved_root,
-            name=root_name,
-            kind=NodeKind.DIRECTORY,
-            size_bytes=0,
-            disk_usage=0,
-            children=[],
-        )
+        root_node = ScanNode.directory(resolved_root, root_name)
 
         q = _WorkQueue()
         q.put(_Task(root_node, 0))

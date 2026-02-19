@@ -282,38 +282,35 @@ def match_all(
     lpath: str,
     lbase: str,
     is_dir: bool,
-    raw_path: str,
 ) -> list[PatternRule]:
     """Return all matching rules for a node, one pass across all categories.
 
-    *lpath* and *lbase* must be pre-lowercased.
-    *raw_path* is the original-case path for additional path matching.
+    *lpath* and *lbase* must be pre-lowercased.  Additional path bases are
+    also pre-lowercased at compile time, so the comparison is consistent.
 
     Returns at most one rule per category (first match wins).
 
     Perf: this function is called once per node during the insight traversal
-    (millions of times on large trees).  All matching is done via inline
-    ``for`` loops instead of list comprehensions to avoid allocating ~10
-    temporary lists per call.  Do not refactor back to comprehensions.
+    (millions of times on large trees).  The first-match-per-category check
+    is inlined at every tier to avoid a closure allocation per call.
     """
     bk = rs.for_dir if is_dir else rs.for_file
     matched: list[PatternRule] = []
     seen: set[str] = set()
 
-    # First-match-per-category gatekeeper: once a category has a hit,
-    # later matches for the same category are ignored.  Called from
-    # every tier below (EXACT, AC, STARTSWITH, GLOB, additional).
-    def _try(rule: PatternRule) -> None:
-        cat = rule.category.value
-        if cat not in seen:
-            seen.add(cat)
-            matched.append(rule)
+    # Inline first-match-per-category gatekeeper at every tier below.
+    # Avoids a closure allocation per match_all call (called millions of
+    # times on large trees).  Each block checks `cat not in seen` before
+    # appending — once a category has a hit, later matches are skipped.
 
     # --- EXACT: O(1) dict lookup ---
     hits = bk.exact.get(lbase)
     if hits:
         for rule in hits:
-            _try(rule)
+            cat = rule.category.value
+            if cat not in seen:
+                seen.add(cat)
+                matched.append(rule)
 
     # --- CONTAINS + ENDSWITH: Aho-Corasick automaton ---
     # A single ac.iter() call finds all CONTAINS and ENDSWITH matches.
@@ -327,22 +324,34 @@ def match_all(
             for rule, end_only in entries:
                 if end_only and end_idx != _lpath_end:
                     continue
-                _try(rule)
+                cat = rule.category.value
+                if cat not in seen:
+                    seen.add(cat)
+                    matched.append(rule)
 
     # --- STARTSWITH ---
     for prefix, rule in bk.startswith:
         if lbase.startswith(prefix):
-            _try(rule)
+            cat = rule.category.value
+            if cat not in seen:
+                seen.add(cat)
+                matched.append(rule)
 
     # --- GLOB fallback ---
     for pat, rule in bk.glob:
         if _match_pattern_slow(pat, lpath, lbase):
-            _try(rule)
+            cat = rule.category.value
+            if cat not in seen:
+                seen.add(cat)
+                matched.append(rule)
 
-    # --- Additional paths (pre-normalized) ---
+    # --- Additional paths (pre-normalized, lowercased) ---
     if bk.additional:
         for base, rule in bk.additional:
-            if raw_path == base or raw_path.startswith(base + "/"):
-                _try(rule)
+            if lpath == base or lpath.startswith(base + "/"):
+                cat = rule.category.value
+                if cat not in seen:
+                    seen.add(cat)
+                    matched.append(rule)
 
     return matched

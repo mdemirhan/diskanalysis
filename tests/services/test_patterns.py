@@ -116,20 +116,20 @@ def _rule(
 
 def test_apply_to_file_does_not_match_dirs() -> None:
     rs = compile_ruleset([_rule("r", "**/*.log", apply_to="file")])
-    result = match_all(rs, "/a/b/foo.log", "foo.log", is_dir=True, raw_path="/a/b/foo.log")
+    result = match_all(rs, "/a/b/foo.log", "foo.log", is_dir=True)
     assert result == []
 
 
 def test_apply_to_dir_does_not_match_files() -> None:
     rs = compile_ruleset([_rule("r", "**/*.egg-info", apply_to="dir")])
-    result = match_all(rs, "/a/foo.egg-info", "foo.egg-info", is_dir=False, raw_path="/a/foo.egg-info")
+    result = match_all(rs, "/a/foo.egg-info", "foo.egg-info", is_dir=False)
     assert result == []
 
 
 def test_apply_to_both_matches_files_and_dirs() -> None:
     rs = compile_ruleset([_rule("r", "**/node_modules/**")])
-    hit_file = match_all(rs, "/x/node_modules/y", "y", is_dir=False, raw_path="/x/node_modules/y")
-    hit_dir = match_all(rs, "/x/node_modules/y", "y", is_dir=True, raw_path="/x/node_modules/y")
+    hit_file = match_all(rs, "/x/node_modules/y", "y", is_dir=False)
+    hit_dir = match_all(rs, "/x/node_modules/y", "y", is_dir=True)
     assert len(hit_file) == 1
     assert len(hit_dir) == 1
 
@@ -142,7 +142,7 @@ def test_first_match_wins_dedup_by_category() -> None:
             _rule("r2", "**/foo", InsightCategory.TEMP),
         ]
     )
-    result = match_all(rs, "/x/foo", "foo", is_dir=False, raw_path="/x/foo")
+    result = match_all(rs, "/x/foo", "foo", is_dir=False)
     assert len(result) == 1
     assert result[0].name == "r1"
 
@@ -154,7 +154,7 @@ def test_multiple_categories_all_returned() -> None:
             _rule("c", "**/foo", InsightCategory.CACHE),
         ]
     )
-    result = match_all(rs, "/x/foo", "foo", is_dir=False, raw_path="/x/foo")
+    result = match_all(rs, "/x/foo", "foo", is_dir=False)
     cats = {r.category for r in result}
     assert cats == {InsightCategory.TEMP, InsightCategory.CACHE}
 
@@ -162,7 +162,7 @@ def test_multiple_categories_all_returned() -> None:
 def test_contains_mid_path() -> None:
     """CONTAINS val (with slashes) fires anywhere in path."""
     rs = compile_ruleset([_rule("r", "**/tmp/**")])
-    result = match_all(rs, "/a/tmp/b/c", "c", is_dir=False, raw_path="/a/tmp/b/c")
+    result = match_all(rs, "/a/tmp/b/c", "c", is_dir=False)
     assert len(result) == 1
 
 
@@ -170,26 +170,26 @@ def test_contains_end_only_alt() -> None:
     """CONTAINS alt (without trailing /) only fires at end of path."""
     rs = compile_ruleset([_rule("r", "**/tmp/**")])
     # Path ending with /tmp — alt "/tmp" matches at end
-    result = match_all(rs, "/a/tmp", "tmp", is_dir=True, raw_path="/a/tmp")
+    result = match_all(rs, "/a/tmp", "tmp", is_dir=True)
     assert len(result) == 1
 
 
 def test_contains_alt_does_not_fire_mid_path() -> None:
     """Alt suffix without trailing / must be at end of path to match."""
     rs = compile_ruleset([_rule("r", "**/tmp/**")])
-    result = match_all(rs, "/a/tmp/b", "b", is_dir=False, raw_path="/a/tmp/b")
+    result = match_all(rs, "/a/tmp/b", "b", is_dir=False)
     assert len(result) == 1  # matched via val "/tmp/", not alt
 
 
 def test_exact_match_on_basename() -> None:
     rs = compile_ruleset([_rule("r", "**/.DS_Store", apply_to="file")])
-    result = match_all(rs, "/a/b/.ds_store", ".ds_store", is_dir=False, raw_path="/a/b/.DS_Store")
+    result = match_all(rs, "/a/b/.ds_store", ".ds_store", is_dir=False)
     assert len(result) == 1
 
 
 def test_endswith_match() -> None:
     rs = compile_ruleset([_rule("r", "**/*.log", apply_to="file")])
-    result = match_all(rs, "/a/b/foo.log", "foo.log", is_dir=False, raw_path="/a/b/foo.log")
+    result = match_all(rs, "/a/b/foo.log", "foo.log", is_dir=False)
     assert len(result) == 1
 
 
@@ -201,12 +201,12 @@ class TestEndswithAC:
 
     def test_suffix_does_not_match_mid_path(self) -> None:
         rs = compile_ruleset([_rule("r", "**/*.log", apply_to="file")])
-        result = match_all(rs, "/a/foo.log/bar", "bar", is_dir=False, raw_path="/a/foo.log/bar")
+        result = match_all(rs, "/a/foo.log/bar", "bar", is_dir=False)
         assert result == []
 
     def test_suffix_matches_at_end_of_path(self) -> None:
         rs = compile_ruleset([_rule("r", "**/*.log")])
-        result = match_all(rs, "/a/b/error.log", "error.log", is_dir=False, raw_path="/a/b/error.log")
+        result = match_all(rs, "/a/b/error.log", "error.log", is_dir=False)
         assert len(result) == 1
         assert result[0].name == "r"
 
@@ -217,31 +217,31 @@ class TestEndswithAC:
                 _rule("bak", "**/*.bak", apply_to="file"),
             ]
         )
-        log_hit = match_all(rs, "/a/x.log", "x.log", is_dir=False, raw_path="/a/x.log")
-        bak_hit = match_all(rs, "/a/x.bak", "x.bak", is_dir=False, raw_path="/a/x.bak")
-        txt_miss = match_all(rs, "/a/x.txt", "x.txt", is_dir=False, raw_path="/a/x.txt")
+        log_hit = match_all(rs, "/a/x.log", "x.log", is_dir=False)
+        bak_hit = match_all(rs, "/a/x.bak", "x.bak", is_dir=False)
+        txt_miss = match_all(rs, "/a/x.txt", "x.txt", is_dir=False)
         assert len(log_hit) == 1 and log_hit[0].name == "log"
         assert len(bak_hit) == 1 and bak_hit[0].name == "bak"
         assert txt_miss == []
 
     def test_endswith_apply_to_dir(self) -> None:
         rs = compile_ruleset([_rule("r", "**/*.egg-info", apply_to="dir")])
-        dir_hit = match_all(rs, "/a/foo.egg-info", "foo.egg-info", is_dir=True, raw_path="/a/foo.egg-info")
-        file_miss = match_all(rs, "/a/foo.egg-info", "foo.egg-info", is_dir=False, raw_path="/a/foo.egg-info")
+        dir_hit = match_all(rs, "/a/foo.egg-info", "foo.egg-info", is_dir=True)
+        file_miss = match_all(rs, "/a/foo.egg-info", "foo.egg-info", is_dir=False)
         assert len(dir_hit) == 1
         assert file_miss == []
 
     def test_endswith_case_insensitive(self) -> None:
         rs = compile_ruleset([_rule("r", "**/*.LOG")])
-        result = match_all(rs, "/a/b/error.log", "error.log", is_dir=False, raw_path="/a/b/error.LOG")
+        result = match_all(rs, "/a/b/error.log", "error.log", is_dir=False)
         assert len(result) == 1
 
     def test_endswith_brace_expansion(self) -> None:
         rs = compile_ruleset([_rule("r", "**/*.{swp,swo,bak}")])
-        swp = match_all(rs, "/a/f.swp", "f.swp", is_dir=False, raw_path="/a/f.swp")
-        swo = match_all(rs, "/a/f.swo", "f.swo", is_dir=False, raw_path="/a/f.swo")
-        bak = match_all(rs, "/a/f.bak", "f.bak", is_dir=False, raw_path="/a/f.bak")
-        py = match_all(rs, "/a/f.py", "f.py", is_dir=False, raw_path="/a/f.py")
+        swp = match_all(rs, "/a/f.swp", "f.swp", is_dir=False)
+        swo = match_all(rs, "/a/f.swo", "f.swo", is_dir=False)
+        bak = match_all(rs, "/a/f.bak", "f.bak", is_dir=False)
+        py = match_all(rs, "/a/f.py", "f.py", is_dir=False)
         assert len(swp) == 1
         assert len(swo) == 1
         assert len(bak) == 1
@@ -254,7 +254,7 @@ class TestEndswithAC:
                 _rule("second", "**/*.log", InsightCategory.TEMP),
             ]
         )
-        result = match_all(rs, "/a/x.log", "x.log", is_dir=False, raw_path="/a/x.log")
+        result = match_all(rs, "/a/x.log", "x.log", is_dir=False)
         assert len(result) == 1
         assert result[0].name == "first"
 
@@ -265,7 +265,7 @@ class TestEndswithAC:
                 _rule("c", "**/*.log", InsightCategory.CACHE),
             ]
         )
-        result = match_all(rs, "/a/x.log", "x.log", is_dir=False, raw_path="/a/x.log")
+        result = match_all(rs, "/a/x.log", "x.log", is_dir=False)
         cats = {r.category for r in result}
         assert cats == {InsightCategory.TEMP, InsightCategory.CACHE}
 
@@ -276,14 +276,14 @@ class TestEndswithAC:
                 _rule("log", "**/*.log", InsightCategory.CACHE, apply_to="file"),
             ]
         )
-        result = match_all(rs, "/a/tmp/err.log", "err.log", is_dir=False, raw_path="/a/tmp/err.log")
+        result = match_all(rs, "/a/tmp/err.log", "err.log", is_dir=False)
         names = {r.name for r in result}
         assert "tmp" in names
         assert "log" in names
 
     def test_endswith_partial_suffix_no_match(self) -> None:
         rs = compile_ruleset([_rule("r", "**/*.log")])
-        result = match_all(rs, "/a/x.logx", "x.logx", is_dir=False, raw_path="/a/x.logx")
+        result = match_all(rs, "/a/x.logx", "x.logx", is_dir=False)
         assert result == []
 
     def test_endswith_populates_ac(self) -> None:
@@ -299,12 +299,12 @@ class TestContainsAC:
 
     def test_no_partial_segment_match(self) -> None:
         rs = compile_ruleset([_rule("r", "**/tmp/**")])
-        result = match_all(rs, "/a/tmpdir/b", "b", is_dir=False, raw_path="/a/tmpdir/b")
+        result = match_all(rs, "/a/tmpdir/b", "b", is_dir=False)
         assert result == []
 
     def test_segment_at_start_of_path(self) -> None:
         rs = compile_ruleset([_rule("r", "**/tmp/**")])
-        result = match_all(rs, "/tmp/foo", "foo", is_dir=False, raw_path="/tmp/foo")
+        result = match_all(rs, "/tmp/foo", "foo", is_dir=False)
         assert len(result) == 1
 
     def test_deeply_nested_match(self) -> None:
@@ -314,7 +314,6 @@ class TestContainsAC:
             "/a/b/c/node_modules/d/e/f",
             "f",
             is_dir=False,
-            raw_path="/a/b/c/node_modules/d/e/f",
         )
         assert len(result) == 1
 
@@ -325,10 +324,10 @@ class TestContainsAC:
                 _rule("cache", "**/.cache/**", InsightCategory.CACHE),
             ]
         )
-        tmp_hit = match_all(rs, "/a/tmp/x", "x", is_dir=False, raw_path="/a/tmp/x")
+        tmp_hit = match_all(rs, "/a/tmp/x", "x", is_dir=False)
         assert len(tmp_hit) == 1 and tmp_hit[0].name == "tmp"
 
-        cache_hit = match_all(rs, "/a/.cache/x", "x", is_dir=False, raw_path="/a/.cache/x")
+        cache_hit = match_all(rs, "/a/.cache/x", "x", is_dir=False)
         assert len(cache_hit) == 1 and cache_hit[0].name == "cache"
 
     def test_alt_matches_directory_entry_itself(self) -> None:
@@ -338,13 +337,12 @@ class TestContainsAC:
             "/a/node_modules",
             "node_modules",
             is_dir=True,
-            raw_path="/a/node_modules",
         )
         assert len(result) == 1
 
     def test_alt_does_not_fire_as_substring(self) -> None:
         rs = compile_ruleset([_rule("r", "**/tmp/**")])
-        result = match_all(rs, "/a/tmp_old", "tmp_old", is_dir=True, raw_path="/a/tmp_old")
+        result = match_all(rs, "/a/tmp_old", "tmp_old", is_dir=True)
         assert result == []
 
     def test_contains_multi_segment(self) -> None:
@@ -354,13 +352,12 @@ class TestContainsAC:
             "/home/user/.cache/pip/wheels/x",
             "x",
             is_dir=False,
-            raw_path="/home/user/.cache/pip/wheels/x",
         )
         assert len(result) == 1
 
     def test_contains_case_insensitive(self) -> None:
         rs = compile_ruleset([_rule("r", "**/TMP/**")])
-        result = match_all(rs, "/a/tmp/b", "b", is_dir=False, raw_path="/a/TMP/b")
+        result = match_all(rs, "/a/tmp/b", "b", is_dir=False)
         assert len(result) == 1
 
     def test_contains_dedup_by_category(self) -> None:
@@ -370,14 +367,14 @@ class TestContainsAC:
                 _rule("second", "**/tmp/**", InsightCategory.TEMP),
             ]
         )
-        result = match_all(rs, "/a/tmp/b", "b", is_dir=False, raw_path="/a/tmp/b")
+        result = match_all(rs, "/a/tmp/b", "b", is_dir=False)
         assert len(result) == 1
         assert result[0].name == "first"
 
 
 def test_startswith_match() -> None:
     rs = compile_ruleset([_rule("r", "**/npm-debug.log*", apply_to="file")])
-    result = match_all(rs, "/a/npm-debug.log.1", "npm-debug.log.1", is_dir=False, raw_path="/a/npm-debug.log.1")
+    result = match_all(rs, "/a/npm-debug.log.1", "npm-debug.log.1", is_dir=False)
     assert len(result) == 1
 
 
@@ -392,7 +389,6 @@ def test_glob_fallback() -> None:
         "/users/x/library/application support/crashreporter/foo",
         "foo",
         is_dir=False,
-        raw_path="/Users/x/Library/Application Support/CrashReporter/foo",
     )
     assert len(result) == 1
 
@@ -412,21 +408,21 @@ def test_ac_both_populated_for_both_contains() -> None:
 def test_additional_paths_exact_match() -> None:
     rule = _rule("extra", "**/*", InsightCategory.CACHE)
     rs = compile_ruleset([], additional_paths=[("/home/user/.cache", rule)])
-    result = match_all(rs, "/home/user/.cache", ".cache", is_dir=True, raw_path="/home/user/.cache")
+    result = match_all(rs, "/home/user/.cache", ".cache", is_dir=True)
     assert len(result) == 1
 
 
 def test_additional_paths_prefix_match() -> None:
     rule = _rule("extra", "**/*", InsightCategory.CACHE)
     rs = compile_ruleset([], additional_paths=[("/home/user/.cache", rule)])
-    result = match_all(rs, "/home/user/.cache/pip/foo", "foo", is_dir=False, raw_path="/home/user/.cache/pip/foo")
+    result = match_all(rs, "/home/user/.cache/pip/foo", "foo", is_dir=False)
     assert len(result) == 1
 
 
 def test_additional_paths_no_partial_prefix() -> None:
     rule = _rule("extra", "**/*", InsightCategory.CACHE)
     rs = compile_ruleset([], additional_paths=[("/home/user/.cache", rule)])
-    result = match_all(rs, "/home/user/.cachex/foo", "foo", is_dir=False, raw_path="/home/user/.cacheX/foo")
+    result = match_all(rs, "/home/user/.cachex/foo", "foo", is_dir=False)
     assert result == []
 
 
@@ -442,7 +438,7 @@ def default_ruleset() -> CompiledRuleSet:
 
 
 def _matches(rs: CompiledRuleSet, path: str, basename: str, is_dir: bool) -> list[PatternRule]:
-    return match_all(rs, path.lower(), basename.lower(), is_dir, path)
+    return match_all(rs, path.lower(), basename.lower(), is_dir)
 
 
 class TestDefaultRulesTemp:
@@ -534,5 +530,5 @@ class TestDefaultRulesBuildArtifact:
 
 def test_case_insensitive_through_pipeline(default_ruleset: CompiledRuleSet) -> None:
     path = "/A/NODE_MODULES/foo"
-    result = match_all(default_ruleset, path.lower(), "foo", is_dir=False, raw_path=path)
+    result = match_all(default_ruleset, path.lower(), "foo", is_dir=False)
     assert any(r.category == InsightCategory.BUILD_ARTIFACT for r in result)

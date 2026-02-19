@@ -7,14 +7,13 @@ from rich.table import Table
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import Insight, InsightBundle
 from dux.models.scan import ScanNode, ScanStats
-from dux.services.formatting import format_bytes
+from dux.services.formatting import format_bytes, relative_path
 from dux.services.insights import filter_insights
 from dux.services.tree import top_nodes
 
 
 def _trim(path: str, root_prefix: str) -> str:
-    raw = path[len(root_prefix) :] if path.startswith(root_prefix) else path
-    return escape(raw)
+    return escape(relative_path(path, root_prefix))
 
 
 def _add_size_column(table: Table, apparent_size: bool) -> None:

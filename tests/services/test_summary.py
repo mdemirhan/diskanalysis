@@ -6,7 +6,7 @@ from rich.console import Console
 
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import CategoryStats, Insight, InsightBundle
-from dux.models.scan import ScanNode, ScanStats
+from dux.models.scan import ScanStats
 from dux.services.summary import (
     _append_size,
     _insights_table,
@@ -15,17 +15,7 @@ from dux.services.summary import (
     render_focused_summary,
     render_summary,
 )
-from dux.services.tree import LEAF_CHILDREN
-
-
-def _dir(path: str, name: str, children: list[ScanNode] | None = None, du: int = 0) -> ScanNode:
-    return ScanNode(
-        path=path, name=name, kind=NodeKind.DIRECTORY, size_bytes=du, disk_usage=du, children=children or []
-    )
-
-
-def _file(path: str, name: str, du: int = 0) -> ScanNode:
-    return ScanNode(path=path, name=name, kind=NodeKind.FILE, size_bytes=du, disk_usage=du, children=LEAF_CHILDREN)
+from tests.factories import make_dir, make_file
 
 
 def _console() -> Console:
@@ -93,15 +83,15 @@ class TestInsightsTable:
 
 class TestTopNodesTable:
     def test_basic(self) -> None:
-        f1 = _file("/r/a", "a", du=100)
-        f2 = _file("/r/b", "b", du=200)
-        root = _dir("/r", "root", [f1, f2], du=300)
+        f1 = make_file("/r/a", du=100)
+        f2 = make_file("/r/b", du=200)
+        root = make_dir("/r", du=300, children=[f1, f2])
         table = _top_nodes_table("Top", root, 10, NodeKind.FILE, "/r/")
         assert table.row_count == 2
 
     def test_apparent_size(self) -> None:
-        f1 = _file("/r/a", "a", du=100)
-        root = _dir("/r", "root", [f1], du=100)
+        f1 = make_file("/r/a", du=100)
+        root = make_dir("/r", du=100, children=[f1])
         table = _top_nodes_table("Top", root, 10, NodeKind.FILE, "/r/", apparent_size=True)
         col_names = [c.header for c in table.columns]
         assert any("Size" in str(h) for h in col_names)
@@ -109,8 +99,8 @@ class TestTopNodesTable:
 
 class TestRenderSummary:
     def test_outputs_table(self) -> None:
-        f1 = _file("/r/a.txt", "a.txt", du=1024)
-        root = _dir("/r", "root", [f1], du=1024)
+        f1 = make_file("/r/a.txt", du=1024)
+        root = make_dir("/r", du=1024, children=[f1])
         stats = ScanStats(files=1, directories=1)
         c = _console()
         render_summary(c, root, stats, "/r/")
@@ -119,7 +109,7 @@ class TestRenderSummary:
         assert "a.txt" in out
 
     def test_apparent_size(self) -> None:
-        root = _dir("/r", "root", [], du=0)
+        root = make_dir("/r")
         stats = ScanStats()
         c = _console()
         render_summary(c, root, stats, "/r/", apparent_size=True)
@@ -141,37 +131,37 @@ class TestRenderFocusedSummary:
         return InsightBundle(insights=insights, by_category=by_cat)
 
     def test_top_temp(self) -> None:
-        root = _dir("/r", "root", [], du=300)
+        root = make_dir("/r", du=300)
         c = _console()
         render_focused_summary(c, root, self._bundle(), 10, "/r/", top_temp=True)
         out = _output(c)
         assert "Temporary" in out
 
     def test_top_cache(self) -> None:
-        root = _dir("/r", "root", [], du=300)
+        root = make_dir("/r", du=300)
         c = _console()
         render_focused_summary(c, root, self._bundle(), 10, "/r/", top_cache=True)
         out = _output(c)
         assert "Cache" in out
 
     def test_top_dirs(self) -> None:
-        sub = _dir("/r/sub", "sub", [], du=100)
-        root = _dir("/r", "root", [sub], du=100)
+        sub = make_dir("/r/sub", du=100)
+        root = make_dir("/r", du=100, children=[sub])
         c = _console()
         render_focused_summary(c, root, self._bundle(), 10, "/r/", top_dirs=True)
         out = _output(c)
         assert "Directories" in out
 
     def test_top_files(self) -> None:
-        f = _file("/r/big.bin", "big.bin", du=500)
-        root = _dir("/r", "root", [f], du=500)
+        f = make_file("/r/big.bin", du=500)
+        root = make_dir("/r", du=500, children=[f])
         c = _console()
         render_focused_summary(c, root, self._bundle(), 10, "/r/", top_files=True)
         out = _output(c)
         assert "Files" in out
 
     def test_no_flags_produces_no_output(self) -> None:
-        root = _dir("/r", "root", [], du=0)
+        root = make_dir("/r")
         c = _console()
         render_focused_summary(c, root, self._bundle(), 10, "/r/")
         assert _output(c) == ""
