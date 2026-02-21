@@ -378,6 +378,17 @@ def test_startswith_match() -> None:
     assert len(result) == 1
 
 
+def test_prefix_trie_populated_when_startswith_rules_exist() -> None:
+    rs = compile_ruleset([_rule("r", "**/npm-debug.log*", apply_to="file")])
+    assert rs.for_file.prefix_trie is not None
+
+
+def test_prefix_trie_none_when_no_startswith_rules() -> None:
+    rs = compile_ruleset([_rule("r", "**/.DS_Store", apply_to="file")])
+    assert rs.for_file.prefix_trie is None
+    assert rs.for_dir.prefix_trie is None
+
+
 def test_glob_fallback() -> None:
     rs = compile_ruleset(
         [

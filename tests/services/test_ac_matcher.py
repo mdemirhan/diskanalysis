@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from dux._matcher import AhoCorasick
+from dux._ac_matcher import AhoCorasick
 
 
 def test_empty_automaton_returns_empty_list() -> None:

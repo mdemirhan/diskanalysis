@@ -17,7 +17,7 @@
 #        EXACT       **/name            dict lookup on basename
 #        CONTAINS    **/segment/**      Aho-Corasick on full path
 #        ENDSWITH    **/*.ext           Aho-Corasick (end-only) on full path
-#        STARTSWITH  **/prefix*         str.startswith on basename
+#        STARTSWITH  **/prefix*         PrefixTrie on basename
 #        GLOB        (anything else)    fnmatch fallback
 #
 #   3. Bucketing — patterns are split by apply_to (file/dir/both) at
@@ -51,7 +51,7 @@
 #     2. CONTAINS+ENDSWITH — single ac.iter(lpath) call. Hits flagged
 #                            end_only=True are accepted only when
 #                            end_idx == len(lpath) - 1.
-#     3. STARTSWITH        — linear scan of prefix rules against lbase.
+#     3. STARTSWITH        — PrefixTrie walk on lbase, O(basename length).
 #     4. GLOB              — fnmatch fallback.
 #     5. Additional paths  — literal path prefix checks for user-configured
 #                            directories (e.g. ~/.cache).
@@ -61,7 +61,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 
-from dux._matcher import AhoCorasick
+from dux._ac_matcher import AhoCorasick
+from dux._prefix_trie import PrefixTrie
 
 from dux.config.schema import PatternRule
 from dux.models.enums import ApplyTo
@@ -188,13 +189,33 @@ def _build_ac(
     return ac
 
 
+def _build_prefix_trie(
+    entries: list[tuple[str, PatternRule]],
+) -> PrefixTrie | None:
+    """Build a PrefixTrie from STARTSWITH entries.
+
+    Groups rules by prefix key so that overlapping prefixes (e.g. "npm" and
+    "npm-debug") each store a ``list[PatternRule]`` as their value.
+    """
+    if not entries:
+        return None
+    grouped: dict[str, list[PatternRule]] = {}
+    for prefix, rule in entries:
+        grouped.setdefault(prefix, []).append(rule)
+    pt = PrefixTrie()
+    for key, rules in grouped.items():
+        pt.add_prefix(key, rules)
+    pt.build()
+    return pt
+
+
 @dataclass(slots=True)
 class _ByKind:
     """All pattern rules for one node kind (file or dir), indexed by matcher kind."""
 
     exact: dict[str, list[PatternRule]] = field(default_factory=dict)
     ac: AhoCorasick | None = None
-    startswith: list[tuple[str, PatternRule]] = field(default_factory=list)
+    prefix_trie: PrefixTrie | None = None
     glob: list[tuple[str, PatternRule]] = field(default_factory=list)
     additional: list[tuple[str, PatternRule]] = field(default_factory=list)
 
@@ -227,7 +248,7 @@ class _ByKindBuilder:
         return _ByKind(
             exact=self.exact,
             ac=_build_ac(self.ac_entries),
-            startswith=self.startswith,
+            prefix_trie=_build_prefix_trie(self.startswith),
             glob=self.glob,
             additional=self.additional,
         )
@@ -329,13 +350,14 @@ def match_all(
                     seen.add(cat)
                     matched.append(rule)
 
-    # --- STARTSWITH ---
-    for prefix, rule in bk.startswith:
-        if lbase.startswith(prefix):
-            cat = rule.category.value
-            if cat not in seen:
-                seen.add(cat)
-                matched.append(rule)
+    # --- STARTSWITH: PrefixTrie ---
+    if bk.prefix_trie is not None:
+        for rules in bk.prefix_trie.iter(lbase):
+            for rule in rules:
+                cat = rule.category.value
+                if cat not in seen:
+                    seen.add(cat)
+                    matched.append(rule)
 
     # --- GLOB fallback ---
     for pat, rule in bk.glob:

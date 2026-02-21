@@ -86,12 +86,19 @@ Two C extensions accelerate the two hottest paths: directory scanning and patter
 - `scan_dir_nodes()` — Uses POSIX `opendir`/`readdir`/`lstat`. Collects entries into a C-level `EntryBuf` (heap-allocated array) while the GIL is released (`Py_BEGIN_ALLOW_THREADS`), then re-acquires the GIL to build `ScanNode` Python objects and append them to `parent.children`. This avoids per-entry GIL acquire/release overhead.
 - `scan_dir_bulk_nodes()` — macOS only. Uses `getattrlistbulk`, which returns name + type + size + alloc-size for all entries in a single syscall per buffer-full (256 KB buffer). Same two-phase pattern: GIL-free I/O fill, then GIL-held node construction.
 
-**`dux._matcher`** (`csrc/matcher.c`) — Aho-Corasick automaton for multi-pattern substring matching:
+**`dux._ac_matcher`** (`csrc/ac_matcher.c`) — Aho-Corasick automaton for multi-pattern substring matching:
 
 - Custom trie with BFS-constructed fail links and dictionary suffix links.
 - 256-wide child array per node for full byte-range UTF-8 safety.
 - Build once (`add_word` + `make_automaton`), then `iter()` is read-only — inherently thread-safe for concurrent readers.
 - Used by `patterns.py` to match all CONTAINS and ENDSWITH patterns in a single linear pass over each path string, replacing O(patterns × path_length) with O(path_length + matches).
+
+**`dux._prefix_trie`** (`csrc/prefix_trie.c`) — Prefix trie for O(basename) startswith matching:
+
+- Simple trie descent: walk text char-by-char from index 0, collect values at every terminal node, stop on first missing child.
+- 256-wide child array per node for full byte-range UTF-8 safety.
+- Build once (`add_prefix` + `build`), then `iter()` is read-only — inherently thread-safe for concurrent readers.
+- Used by `patterns.py` to match all STARTSWITH patterns in O(basename_length) regardless of pattern count.
 
 ### Scanner Backends (`dux/scan/`)
 

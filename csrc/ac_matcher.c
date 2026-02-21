@@ -313,7 +313,7 @@ static PyMethodDef AhoCorasick_methods[] = {
 
 static PyTypeObject AhoCorasickType = {
     PyVarObject_HEAD_INIT(NULL, 0)
-    .tp_name = "dux._matcher.AhoCorasick",
+    .tp_name = "dux._ac_matcher.AhoCorasick",
     .tp_basicsize = sizeof(AhoCorasickObject),
     .tp_flags = Py_TPFLAGS_DEFAULT,
     .tp_doc = "Aho-Corasick automaton for multi-pattern string matching.",
@@ -351,14 +351,14 @@ static PyModuleDef_Slot matcher_slots[] = {
 
 static struct PyModuleDef matcher_module = {
     PyModuleDef_HEAD_INIT,
-    .m_name = "dux._matcher",
+    .m_name = "dux._ac_matcher",
     .m_doc = "Custom Aho-Corasick automaton (GIL-free).",
     .m_size = 0,
     .m_slots = matcher_slots,
 };
 
 PyMODINIT_FUNC
-PyInit__matcher(void)
+PyInit__ac_matcher(void)
 {
     return PyModuleDef_Init(&matcher_module);
 }

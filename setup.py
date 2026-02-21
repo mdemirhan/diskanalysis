@@ -18,8 +18,14 @@ setup(
             extra_link_args=["-flto"],
         ),
         Extension(
-            "dux._matcher",
-            sources=["csrc/matcher.c"],
+            "dux._ac_matcher",
+            sources=["csrc/ac_matcher.c"],
+            extra_compile_args=_common_flags,
+            extra_link_args=["-flto"],
+        ),
+        Extension(
+            "dux._prefix_trie",
+            sources=["csrc/prefix_trie.c"],
             extra_compile_args=_common_flags,
             extra_link_args=["-flto"],
         ),
