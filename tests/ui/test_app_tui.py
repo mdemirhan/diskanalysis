@@ -4,6 +4,7 @@ import threading
 
 import pytest
 from result import Err
+from textual.widgets import Static
 
 from dux.config.schema import AppConfig, PatternRule
 from dux.models.enums import ApplyTo, InsightCategory, NodeKind
@@ -341,6 +342,9 @@ async def test_browse_ignores_duplicate_refresh_while_one_is_running() -> None:
                 break
             await pilot.pause(0.01)
         assert app._refresh_status == 'Refreshing "r".'
+        refresh_footer = app.query_one("#status-row", Static).render()
+        assert 'Refreshing "r".' in refresh_footer.plain
+        assert "Row " not in refresh_footer.plain
         app._advance_refresh_animation()
         assert app._refresh_status == 'Refreshing "r"..'
         app._advance_refresh_animation()
@@ -355,3 +359,6 @@ async def test_browse_ignores_duplicate_refresh_while_one_is_running() -> None:
                 break
             await pilot.pause(0.01)
         assert app._refreshing is False
+        normal_footer = app.query_one("#status-row", Static).render()
+        assert "Row " in normal_footer.plain
+        assert "Refreshing" not in normal_footer.plain

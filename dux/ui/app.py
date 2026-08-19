@@ -405,19 +405,20 @@ class DuxApp(App[None]):
 
         active_filter = vs.filter_text
 
-        left = f"Row {cursor}/{total_rows}"
-        if paged_total > self._page_size:
-            total_pages = max(1, (paged_total + self._page_size - 1) // self._page_size)
-            assert state is not None
-            page_index = state.page_index
-            left += f" | Page {page_index + 1}/{total_pages}"
-        trimmed_text = self._trimmed_indicator(self.current_view)
-        if trimmed_text:
-            left += f" | {trimmed_text}"
-        if active_filter:
-            left += f" | Filter: '{escape(active_filter)}'"
         if self._refreshing:
-            left += f" | {escape(self._refresh_status)}"
+            left = escape(self._refresh_status)
+        else:
+            left = f"Row {cursor}/{total_rows}"
+            if paged_total > self._page_size:
+                total_pages = max(1, (paged_total + self._page_size - 1) // self._page_size)
+                assert state is not None
+                page_index = state.page_index
+                left += f" | Page {page_index + 1}/{total_pages}"
+            trimmed_text = self._trimmed_indicator(self.current_view)
+            if trimmed_text:
+                left += f" | {trimmed_text}"
+            if active_filter:
+                left += f" | Filter: '{escape(active_filter)}'"
 
         hints = "q quit | ? help | Tab views | / search | y yank path | Y yank name"
         if self.current_view == "browse":
