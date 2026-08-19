@@ -43,6 +43,13 @@ class MemoryFileSystem:
         )
         return self
 
+    def remove(self, path: str) -> MemoryFileSystem:
+        key = self._normalize(path)
+        prefix = key.rstrip("/") + "/"
+        for entry_path in [p for p in self._entries if p == key or p.startswith(prefix)]:
+            del self._entries[entry_path]
+        return self
+
     def expanduser(self, path: str) -> str:
         return path.replace("~", "/mock/home")
 

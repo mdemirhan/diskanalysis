@@ -6,11 +6,11 @@ Parallel disk usage analyzer for macOS and Linux. Scans directories with multi-t
 
 ## Screenshots
 
-**CLI summary** (`uv run dux`)
+**CLI summary** (`uv run dux -n`)
 
 ![CLI summary table](media/summary.png)
 
-**TUI overview** (`uv run dux -i`)
+**TUI overview** (`uv run dux`)
 
 ![TUI overview tab](media/overview.png)
 
@@ -21,7 +21,7 @@ Parallel disk usage analyzer for macOS and Linux. Scans directories with multi-t
 ## Features
 
 - **Parallel scanning** with configurable thread pool (default 4 workers)
-- **Interactive TUI** with 5 views, vim keybindings, search/filter, pagination
+- **Interactive TUI** with 5 views, vim keybindings, localized subtree refresh, search/filter, and pagination
 - **Composable CLI flags** — `--top-temp`, `--top-cache`, `--top-dirs`, `--top-files` each print their own table and can be freely combined
 - **59 built-in pattern rules** for detecting temp files, caches, and build artifacts across dozens of ecosystems (Node, Python, Rust, Go, JVM, Swift, C++, and more)
 - **Fully configurable** via JSON config with pattern overrides and custom paths
@@ -37,11 +37,14 @@ git clone https://github.com/mdemirhan/dux.git
 cd dux
 uv sync
 
-# Analyze current directory (summary table)
+# Analyze current directory in the interactive TUI
 uv run dux
 
-# Analyze a specific path
+# Analyze a specific path interactively
 uv run dux ~/src
+
+# Print a non-interactive summary and exit
+uv run dux -n ~/src
 
 # Include apparent (logical) file size column
 uv run dux -A ~/src
@@ -52,7 +55,7 @@ uv run dux -t ~/src
 # Combine flags: summary + cache + temp
 uv run dux -c -t ~/src
 
-# Interactive TUI
+# Explicit interactive flag (optional compatibility alias)
 uv run dux -i ~/src
 ```
 
@@ -71,8 +74,9 @@ alias dux='uv run --project /path/to/dux dux'
 Replace `/path/to/dux` with the actual clone path. Then:
 
 ```bash
-dux ~/src          # CLI summary
-dux -i ~/src       # Interactive TUI
+dux ~/src          # Interactive TUI
+dux -n ~/src       # CLI summary
+dux -i ~/src       # Explicit interactive compatibility flag
 dux -v ~/src       # Verbose (shows GIL status, scanner, timing)
 ```
 
@@ -106,6 +110,7 @@ Switch views with `Tab`/`Shift+Tab` or press the shortcut key directly.
 | `l` / `Right` / `Enter` | Expand or drill into directory |
 | `h` / `Left` / `Backspace` | Collapse or go to parent |
 | `Space` | Toggle expand/collapse |
+| `r` | Refresh the selected item and its complete subtree |
 
 ### General
 
@@ -124,11 +129,12 @@ Switch views with `Tab`/`Shift+Tab` or press the shortcut key directly.
 uv run dux [PATH] [OPTIONS]
 ```
 
-By default dux prints a CLI summary table. Use `--interactive` / `-i` to launch the TUI. The `--top-*` flags are composable — use multiple at once to print additional tables.
+By default dux launches the interactive TUI. Use `--non-interactive` / `-n` to print a summary and exit. The `--top-*` flags remain composable and imply non-interactive mode for compatibility; `--interactive` / `-i` can explicitly override that behavior.
 
 | Option | Description |
 |--------|-------------|
-| `--interactive` / `-i` | Launch interactive TUI |
+| `--interactive` / `-i` | Explicitly launch the interactive TUI (default) |
+| `--non-interactive` / `-n` | Print a summary and exit |
 | `--apparent-size` / `-A` | Show apparent size column (logical file size) |
 | `--top-temp` / `-t` | Largest temp/build artifacts |
 | `--top-cache` / `-c` | Largest cache files/directories |

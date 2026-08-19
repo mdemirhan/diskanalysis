@@ -56,7 +56,7 @@ Each phase produces a well-defined output that feeds into the next:
 ### Entry point
 
 ```
-dux /home/user/projects --interactive --workers 8 --top-temp
+dux /home/user/projects --workers 8
 ```
 
 `dux.cli.app:cli()` is a typer command. It calls `run()` which:
@@ -642,10 +642,10 @@ InsightBundle(
 **Files:** `dux/services/summary.py`, `dux/services/formatting.py`,
 `dux/ui/app.py`, `dux/ui/views.py`
 
-### CLI output (default)
+### Non-interactive CLI output (`--non-interactive` / `-n`)
 
 ```
-dux /home/user/projects
+dux /home/user/projects --non-interactive
 ```
 
 Renders a Rich table showing the root's immediate children sorted by disk
@@ -674,7 +674,7 @@ Optional `--top-*` flags add focused tables:
 | `--top-dirs` / `-d` | Largest directories (any category) |
 | `--top-files` / `-f` | Largest files (any category) |
 
-### Interactive TUI (`--interactive` / `-i`)
+### Interactive TUI (default; explicit `--interactive` / `-i`)
 
 A Textual-based terminal UI with five tabs:
 
@@ -704,6 +704,23 @@ A Textual-based terminal UI with five tabs:
 
 Each tab maintains its own `_ViewState` (cursor position, scroll offset,
 filter text, cached rows) so switching tabs preserves context.
+
+### Localized Browse refresh
+
+Pressing `r` in Browse refreshes the selected filesystem item. Directories
+are rescanned recursively through the same `Scanner.scan()` entry point and
+the same native or Python backend selected at startup. Files are refreshed by
+scanning their parent at `max_depth=0` and extracting the matching child, so
+native refreshes still use `readdir` or `getattrlistbulk` rather than a second
+filesystem implementation.
+
+The scan and all derived-state rebuilding happen in a Textual background
+worker. A copy-on-write merge replaces the selected subtree, recalculates only
+its ancestor sizes, then regenerates insights and path indexes. The TUI swaps
+the tree, statistics, insights, and indexes together, invalidates every view's
+row cache, and preserves Browse selection/expansion state where the paths still
+exist. Deleted items are removed; accessible partial results are applied and
+reported when a scan encounters access errors.
 
 ### DisplayRow
 

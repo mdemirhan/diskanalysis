@@ -10,6 +10,7 @@ dependencies = [
   "textual>=0.89.0",
   "result>=0.17.0",
   "setuptools>=82.0.0",
+  "pyrefly>=0.60.0",
 ]
 
 [project.optional-dependencies]

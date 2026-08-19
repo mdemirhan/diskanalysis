@@ -134,13 +134,29 @@ def _scan_with_progress(path: Path, options: ScanOptions, workers: int, scanner:
     return result
 
 
+def _launch_interactive(
+    *,
+    interactive: bool,
+    non_interactive: bool,
+    focused_summary_requested: bool,
+) -> bool:
+    if interactive and non_interactive:
+        raise typer.BadParameter("--interactive and --non-interactive cannot be used together")
+    if interactive:
+        return True
+    return not non_interactive and not focused_summary_requested
+
+
 def run(
     path: Annotated[str, typer.Argument(help="Path to analyze.")] = ".",
     top_temp: Annotated[bool, typer.Option("--top-temp", "-t", help="Show largest temp/build artifacts.")] = False,
     top_cache: Annotated[bool, typer.Option("--top-cache", "-c", help="Show largest cache files/directories.")] = False,
     top_dirs: Annotated[bool, typer.Option("--top-dirs", "-d", help="Show largest directories.")] = False,
     top_files: Annotated[bool, typer.Option("--top-files", "-f", help="Show largest files.")] = False,
-    interactive: Annotated[bool, typer.Option("--interactive", "-i", help="Launch interactive TUI.")] = False,
+    interactive: Annotated[
+        bool, typer.Option("--interactive", "-i", help="Launch interactive TUI (default; compatibility flag).")
+    ] = False,
+    non_interactive: Annotated[bool, typer.Option("--non-interactive", "-n", help="Print a summary and exit.")] = False,
     sample_config: Annotated[bool, typer.Option("--sample-config", help="Print sample config JSON.")] = False,
     max_depth: Annotated[int | None, typer.Option("--max-depth", help="Max directory depth to scan.")] = None,
     workers: Annotated[int | None, typer.Option("--workers", "-w", help="Number of scan workers.")] = None,
@@ -169,6 +185,12 @@ def run(
     if sample_config:
         console.print(sample_config_json())
         raise typer.Exit(0)
+
+    launch_interactive = _launch_interactive(
+        interactive=interactive,
+        non_interactive=non_interactive,
+        focused_summary_requested=top_temp or top_cache or top_dirs or top_files,
+    )
 
     config_result = load_config()
     if isinstance(config_result, Err):
@@ -229,13 +251,15 @@ def run(
         msg = f"[#969896]Scan: {scan_elapsed:.2f}s | Insights: {insight_elapsed:.2f}s | {stats.files:,} files, {stats.directories:,} dirs[/]"
         console.print(msg)
 
-    if interactive:
+    if launch_interactive:
         DuxApp(
             root=snapshot.root,
             stats=snapshot.stats,
             bundle=bundle,
             config=config,
             apparent_size=apparent_size,
+            scanner=scanner_impl,
+            scan_options=scan_options,
         ).run()
         raise typer.Exit(0)
 

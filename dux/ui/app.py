@@ -4,20 +4,23 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Callable, override
+from typing import TYPE_CHECKING, Callable, override
 
 from rich.markup import escape
 from rich.text import Text
-from textual import on
+from result import Err
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
+from textual.timer import Timer
 from textual.widgets import DataTable, Input, Static
 
 from dux.config.schema import AppConfig
 from dux.models.enums import InsightCategory, NodeKind
 from dux.models.insight import CategoryStats, InsightBundle
-from dux.models.scan import ScanNode, ScanStats
+from dux.models.scan import ScanError, ScanErrorCode, ScanNode, ScanOptions, ScanStats
+from dux.scan import Scanner
 from dux.services.formatting import format_bytes, relative_bar
 from dux.ui.views import (
     DisplayRow,
@@ -26,6 +29,9 @@ from dux.ui.views import (
     overview_rows,
     top_nodes_rows,
 )
+
+if TYPE_CHECKING:
+    from dux.services.refresh import RefreshOutcome, RefreshResult
 
 
 TABS: tuple[str, ...] = ("overview", "browse", "large_dir", "large_file", "temp")
@@ -126,6 +132,7 @@ class HelpOverlay(ModalScreen[None]):
                 "  Enter: Drill in",
                 "  Backspace: Drill out",
                 "  Space: Toggle expand/collapse",
+                "  r: Refresh selected item/subtree",
                 "",
                 "[b #81a2be]Pagination[/]",
                 "  [ / ]: Previous/Next page",
@@ -232,12 +239,16 @@ class DuxApp(App[None]):
         config: AppConfig,
         initial_view: str = "overview",
         apparent_size: bool = False,
+        scanner: Scanner | None = None,
+        scan_options: ScanOptions | None = None,
     ) -> None:
         super().__init__()
         self.root = root
         self.stats = stats
         self.bundle = bundle
         self.config = config
+        self._scanner = scanner
+        self._scan_options = scan_options or ScanOptions(max_depth=config.max_depth)
         self._apparent_size = apparent_size
         self.current_view = initial_view if initial_view in TABS else "overview"
 
@@ -257,6 +268,11 @@ class DuxApp(App[None]):
         self.rows: list[DisplayRow] = []
         self.selected_index = 0
         self.pending_g = False
+        self._refreshing = False
+        self._refresh_status = ""
+        self._refresh_label = ""
+        self._refresh_dots = 1
+        self._refresh_timer: Timer | None = None
         self._views: dict[str, _ViewState] = {
             v: _ViewState(paged=_PagedState() if v in _PAGED_VIEWS else None) for v in TABS
         }
@@ -400,10 +416,12 @@ class DuxApp(App[None]):
             left += f" | {trimmed_text}"
         if active_filter:
             left += f" | Filter: '{escape(active_filter)}'"
+        if self._refreshing:
+            left += f" | {escape(self._refresh_status)}"
 
         hints = "q quit | ? help | Tab views | / search | y yank path | Y yank name"
         if self.current_view == "browse":
-            hints += " | h/l collapse/expand | Enter/Backspace drill-in/out"
+            hints += " | r refresh | h/l collapse/expand | Enter/Backspace drill-in/out"
         if paged_total > self._page_size:
             hints += " | \\[/] prev/next page"
         if active_filter:
@@ -606,6 +624,156 @@ class DuxApp(App[None]):
             return None
         return self.rows[self.selected_index].path
 
+    def _path_ancestry(self, path: str) -> tuple[str, ...]:
+        ancestry: list[str] = []
+        current: str | None = path
+        while current is not None:
+            ancestry.append(current)
+            current = self.parent_by_path.get(current)
+        return tuple(ancestry)
+
+    def _selected_depth(self, path: str) -> int:
+        return max(0, len(self._path_ancestry(path)) - 1)
+
+    def _advance_refresh_animation(self) -> None:
+        if not self._refreshing:
+            return
+        self._refresh_dots = self._refresh_dots % 3 + 1
+        self._refresh_status = f'Refreshing "{self._refresh_label}"{"." * self._refresh_dots}'
+        self._render_footer_rows()
+
+    def _stop_refresh_animation(self) -> None:
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+            self._refresh_timer = None
+        self._refreshing = False
+        self._refresh_status = ""
+
+    def _nearest_surviving_path(self, ancestry: tuple[str, ...], outcome: RefreshOutcome) -> str:
+        for path in ancestry:
+            if path in outcome.node_by_path:
+                return path
+        return outcome.root.path
+
+    def _apply_refresh(
+        self,
+        result: RefreshResult,
+        selection_ancestry: tuple[str, ...],
+        browse_root_ancestry: tuple[str, ...],
+    ) -> None:
+        self._stop_refresh_animation()
+        if isinstance(result, Err):
+            error = result.unwrap_err()
+            self.notify(f"Refresh failed: {error.message}", severity="error", timeout=4)
+            self._render_footer_rows()
+            return
+
+        outcome = result.unwrap()
+        self.root = outcome.root
+        self.stats = outcome.stats
+        self.bundle = outcome.bundle
+        self.node_by_path = outcome.node_by_path
+        self.parent_by_path = outcome.parent_by_path
+        self._root_prefix = self.root.path.rstrip("/") + "/"
+
+        self.expanded = {
+            path
+            for path in self.expanded
+            if (node := self.node_by_path.get(path)) is not None and node.kind is NodeKind.DIRECTORY
+        }
+        self.expanded.add(self.root.path)
+        self.browse_root_path = self._nearest_surviving_path(browse_root_ancestry, outcome)
+        selected_path = self._nearest_surviving_path(selection_ancestry, outcome)
+
+        for view in TABS:
+            self._invalidate_rows(view)
+
+        browse_state = self._views["browse"]
+        browse_state.rows_cache = self._browse_rows()
+        filtered_browse_rows = self._filtered_rows("browse", browse_state.rows_cache)
+        browse_state.cursor = next(
+            (index for index, row in enumerate(filtered_browse_rows) if row.path == selected_path),
+            0,
+        )
+        if self.current_view == "browse":
+            self.selected_index = browse_state.cursor
+
+        self._refresh_all()
+        if outcome.removed:
+            self.notify(f"Removed missing item: {outcome.selected_path}", timeout=3)
+        elif outcome.refresh_access_errors:
+            self.notify(
+                f"Refresh completed with {outcome.refresh_access_errors:,} access errors",
+                severity="warning",
+                timeout=4,
+            )
+        else:
+            self.notify(f"Refreshed: {outcome.selected_path}", timeout=2)
+
+    @work(thread=True, exclusive=True, group="localized-refresh", exit_on_error=False)
+    def _run_refresh(
+        self,
+        selected_path: str,
+        selected_depth: int,
+        selection_ancestry: tuple[str, ...],
+        browse_root_ancestry: tuple[str, ...],
+    ) -> None:
+        # Keep refresh-only modules off the startup import path.
+        from dux.services.refresh import refresh_subtree
+
+        assert self._scanner is not None
+
+        try:
+            result = refresh_subtree(
+                root=self.root,
+                stats=self.stats,
+                selected_path=selected_path,
+                selected_depth=selected_depth,
+                node_by_path=self.node_by_path,
+                parent_by_path=self.parent_by_path,
+                scanner=self._scanner,
+                scan_options=self._scan_options,
+                config=self.config,
+            )
+        except Exception as exc:  # noqa: BLE001
+            result = Err(
+                ScanError(
+                    code=ScanErrorCode.INTERNAL,
+                    path=selected_path,
+                    message=f"Unhandled refresh failure: {exc}",
+                )
+            )
+        self.call_from_thread(self._apply_refresh, result, selection_ancestry, browse_root_ancestry)
+
+    def _refresh_selected(self) -> None:
+        if self.current_view != "browse":
+            return
+        if self._refreshing:
+            self.notify("A refresh is already running", timeout=2)
+            return
+        if self._scanner is None:
+            self.notify("Refresh is unavailable for this session", severity="error", timeout=3)
+            return
+        selected_path = self._selected_path()
+        if selected_path is None or selected_path not in self.node_by_path:
+            return
+        selected_node = self.node_by_path[selected_path]
+
+        selection_ancestry = self._path_ancestry(selected_path)
+        browse_root_ancestry = self._path_ancestry(self.browse_root_path)
+        self._refreshing = True
+        self._refresh_label = selected_node.name or selected_path
+        self._refresh_dots = 1
+        self._refresh_status = f'Refreshing "{self._refresh_label}".'
+        self._refresh_timer = self.set_interval(0.4, self._advance_refresh_animation)
+        self._render_footer_rows()
+        self._run_refresh(
+            selected_path,
+            self._selected_depth(selected_path),
+            selection_ancestry,
+            browse_root_ancestry,
+        )
+
     def _toggle_expand(self) -> None:
         if self.current_view != "browse":
             return
@@ -791,6 +959,9 @@ class DuxApp(App[None]):
         return False
 
     def _handle_browse_key(self, key: str) -> bool:
+        if key == "r":
+            self._refresh_selected()
+            return True
         if key in {"h", "left"}:
             self._collapse_or_parent()
             return True

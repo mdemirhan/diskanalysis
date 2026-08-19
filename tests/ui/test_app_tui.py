@@ -1,14 +1,35 @@
 from __future__ import annotations
 
-import pytest
+import threading
 
-from dux.config.schema import AppConfig
-from dux.models.enums import InsightCategory, NodeKind
+import pytest
+from result import Err
+
+from dux.config.schema import AppConfig, PatternRule
+from dux.models.enums import ApplyTo, InsightCategory, NodeKind
 from dux.models.insight import CategoryStats, Insight, InsightBundle
-from dux.models.scan import ScanStats
+from dux.models.scan import ScanOptions, ScanStats
+from dux.scan import Scanner
+from dux.scan.python_scanner import PythonScanner
+from dux.services.insights import generate_insights
 from dux.services.tree import finalize_sizes
 from dux.ui.app import DuxApp
 from tests.factories import make_dir, make_file
+from tests.fs_mock import MemoryFileSystem
+
+
+class _BlockingScanner:
+    def __init__(self, scanner: Scanner) -> None:
+        self._scanner = scanner
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.calls = 0
+
+    def scan(self, path, options, progress_callback=None, cancel_check=None):
+        self.calls += 1
+        self.entered.set()
+        self.release.wait(timeout=2)
+        return self._scanner.scan(path, options, progress_callback, cancel_check)
 
 
 def _make_app(apparent_size: bool = False) -> DuxApp:
@@ -230,3 +251,107 @@ async def test_resize_triggers_refresh() -> None:
         # Just verifying it doesn't crash
         await pilot.resize_terminal(80, 30)
         assert len(app.rows) > 0
+
+
+@pytest.mark.asyncio
+async def test_browse_r_refreshes_subtree_and_all_derived_views() -> None:
+    fs = (
+        MemoryFileSystem()
+        .add_dir("/r")
+        .add_dir("/r/sub")
+        .add_file("/r/sub/old.txt", size=10)
+        .add_file("/r/sibling.txt", size=20)
+    )
+    scanner = PythonScanner(workers=1, fs=fs)
+    scan_options = ScanOptions()
+    scan_result = scanner.scan("/r", scan_options)
+    assert not isinstance(scan_result, Err)
+    snapshot = scan_result.unwrap()
+    config = AppConfig(
+        patterns=[
+            PatternRule(
+                name="temp extension",
+                pattern="**/*.tmp",
+                category=InsightCategory.TEMP,
+                apply_to=ApplyTo.FILE,
+            )
+        ],
+        page_size=50,
+        max_insights_per_category=100,
+        overview_top_dirs=10,
+        scroll_step=5,
+    )
+    app = DuxApp(
+        root=snapshot.root,
+        stats=snapshot.stats,
+        bundle=generate_insights(snapshot.root, config),
+        config=config,
+        scanner=scanner,
+        scan_options=scan_options,
+    )
+    fs.remove("/r/sub/old.txt").add_file("/r/sub/new.tmp", size=40)
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("b")
+        sub_index = next(index for index, row in enumerate(app.rows) if row.path == "/r/sub")
+        for _ in range(sub_index):
+            await pilot.press("j")
+        await pilot.press("space")
+        await pilot.press("r")
+        for _ in range(200):
+            if not app._refreshing:
+                break
+            await pilot.pause(0.01)
+
+        assert app._refreshing is False
+        assert "/r/sub/old.txt" not in app.node_by_path
+        assert app.node_by_path["/r/sub/new.tmp"].disk_usage == 40
+        assert app.root.disk_usage == 60
+        assert app.stats.files == 2
+        assert any(item.path == "/r/sub/new.tmp" for item in app.bundle.insights)
+        assert app.rows[app.selected_index].path == "/r/sub"
+        assert any(row.path == "/r/sub/new.tmp" for row in app.rows)
+
+        await pilot.press("t")
+        assert any(row.path == "/r/sub/new.tmp" for row in app.rows)
+
+
+@pytest.mark.asyncio
+async def test_browse_ignores_duplicate_refresh_while_one_is_running() -> None:
+    fs = MemoryFileSystem().add_dir("/r").add_dir("/r/sub").add_file("/r/sub/a.txt", size=10)
+    scanner = PythonScanner(workers=1, fs=fs)
+    scan_result = scanner.scan("/r", ScanOptions())
+    assert not isinstance(scan_result, Err)
+    snapshot = scan_result.unwrap()
+    blocking_scanner = _BlockingScanner(scanner)
+    config = AppConfig(page_size=50, max_insights_per_category=100, overview_top_dirs=10, scroll_step=5)
+    app = DuxApp(
+        root=snapshot.root,
+        stats=snapshot.stats,
+        bundle=generate_insights(snapshot.root, config),
+        config=config,
+        scanner=blocking_scanner,
+    )
+
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.press("b")
+        await pilot.press("r")
+        for _ in range(100):
+            if blocking_scanner.entered.is_set():
+                break
+            await pilot.pause(0.01)
+        assert app._refresh_status == 'Refreshing "r".'
+        app._advance_refresh_animation()
+        assert app._refresh_status == 'Refreshing "r"..'
+        app._advance_refresh_animation()
+        assert app._refresh_status == 'Refreshing "r"...'
+        app._advance_refresh_animation()
+        assert app._refresh_status == 'Refreshing "r".'
+        await pilot.press("r")
+        assert blocking_scanner.calls == 1
+        blocking_scanner.release.set()
+        for _ in range(200):
+            if not app._refreshing:
+                break
+            await pilot.pause(0.01)
+        assert app._refreshing is False
